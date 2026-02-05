@@ -64,7 +64,7 @@ chmod +x start.sh
   "message": "OK",
   "data": {
     "fileName": "example.pdf",
-    "filePath": "/Users/wuxufei/GolandProjects/Fo-Sentinel-Agent/docs/example.pdf",
+    "filePath": "/Users/xxx/GolandProjects/Fo-Sentinel-Agent/docs/example.pdf",
     "fileSize": 1024000
   }
 }
