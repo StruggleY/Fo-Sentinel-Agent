@@ -30,7 +30,7 @@ func main() {
 	fmt.Println("Q: 你好")
 	fmt.Println("A:", answer)
 	mem.GetSimpleMemory(id).SetMessages(schema.UserMessage("你好"))
-	mem.GetSimpleMemory(id).SetMessages(schema.SystemMessage(out.Content))
+	mem.GetSimpleMemory(id).SetMessages(schema.AssistantMessage(out.Content, nil))
 	// 第二次对话
 	userMessage = &chat_pipeline.UserMessage{
 		ID:      id,

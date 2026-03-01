@@ -8,7 +8,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// newDocumentTransformer component initialization function of node 'MarkdownSplitter' in graph 'KnowledgeIndexing'
+// newDocumentTransformer 初始化 Markdown 文档分割器组件。
+// - 基于 Markdown 标题（如 "#"）将整篇文档拆成多个逻辑小节
+// - 为拆分后的每个片段生成新的唯一 ID，作为后续索引和检索的最小文档单元
+// - 仅负责“分块”和元信息处理，不参与向量化，便于与下游索引器解耦
 func newDocumentTransformer(ctx context.Context) (tfr document.Transformer, err error) {
 	config := &markdown.HeaderConfig{
 		Headers: map[string]string{

@@ -27,14 +27,18 @@ func BuildKnowledgeIndexing(ctx context.Context) (r compose.Runnable[document.So
 	}
 	_ = g.AddLoaderNode(FileLoader, fileLoaderKeyOfLoader)
 
-	// 步骤3: 创建并添加文档分割器节点(将文档切分为块)
+	// 步骤3: 创建并添加文档分割器节点
+	// 注意：该节点只负责“如何把原始文档拆成多个语义片段”（如按 Markdown 标题分段），
+	// 不做向量化，便于后续可以替换不同的切分策略，而不影响下游索引器逻辑。
 	markdownSplitterKeyOfDocumentTransformer, err := newDocumentTransformer(ctx)
 	if err != nil {
 		return nil, err
 	}
 	_ = g.AddDocumentTransformerNode(MarkdownSplitter, markdownSplitterKeyOfDocumentTransformer)
 
-	// 步骤4: 创建并添加向量索引器节点(生成向量并存储到Milvus)
+	// 步骤4: 创建并添加向量索引器节点
+	// 该节点会为每个“已分片文档”调用 Embedding 组件（如 DoubaoEmbedding）生成向量，
+	// 并按照 Milvus 的字段 schema（id/vector/content/metadata）将数据写入向量库。
 	milvusIndexerKeyOfIndexer, err := newIndexer(ctx)
 	if err != nil {
 		return nil, err
