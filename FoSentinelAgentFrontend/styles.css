@@ -427,6 +427,7 @@ body {
     justify-content: center;
     align-items: center;
     min-height: 100%;
+    padding-bottom: 20vh;
 }
 
 .chat-messages {
@@ -475,7 +476,7 @@ body {
 .welcome-greeting {
     text-align: center;
     color: #1a73e8;
-    font-size: 1.5rem;
+    font-size: 1.85rem;
     padding: 20px;
     font-weight: 400;
     opacity: 0;
