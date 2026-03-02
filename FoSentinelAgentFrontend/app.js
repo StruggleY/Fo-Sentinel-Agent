@@ -492,6 +492,17 @@ class FoSentinelAgentApp {
         this.renderChatHistory();
     }
     
+    // 自动保存当前对话并刷新侧边栏历史列表（新对话和历史对话均适用）
+    autoSaveAndRenderHistory() {
+        if (this.currentChatHistory.length === 0) return;
+        if (this.isCurrentChatFromHistory) {
+            this.updateCurrentChatHistory();
+        } else {
+            this.saveCurrentChat();
+        }
+        this.renderChatHistory();
+    }
+
     // 删除历史对话
     deleteChatHistory(historyId) {
         this.chatHistories = this.chatHistories.filter(h => h.id !== historyId);
@@ -627,12 +638,8 @@ class FoSentinelAgentApp {
         } finally {
             this.isStreaming = false;
             this.updateUI();
-            
-            // 如果当前对话是从历史记录加载的，更新历史记录
-            if (this.isCurrentChatFromHistory && this.currentChatHistory.length > 0) {
-                this.updateCurrentChatHistory();
-                this.renderChatHistory(); // 更新历史对话列表显示
-            }
+            // 每次消息完成后统一保存并刷新侧边栏（新对话和历史对话均适用）
+            this.autoSaveAndRenderHistory();
         }
     }
 
@@ -705,22 +712,16 @@ class FoSentinelAgentApp {
                             const messageContent = assistantMessageElement.querySelector('.message-content');
                             if (messageContent) {
                                 messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                // 高亮代码块
                                 this.highlightCodeBlocks(messageContent);
                             }
                         }
-                        // 保存流式消息到历史记录
                         if (fullResponse) {
                             this.currentChatHistory.push({
                                 type: 'assistant',
                                 content: fullResponse,
                                 timestamp: new Date().toISOString()
                             });
-                            // 如果当前对话是从历史记录加载的，更新历史记录
-                            if (this.isCurrentChatFromHistory) {
-                                this.updateCurrentChatHistory();
-                                this.renderChatHistory();
-                            }
+                            this.autoSaveAndRenderHistory();
                         }
                         break;
                     }
@@ -744,28 +745,21 @@ class FoSentinelAgentApp {
                             if (currentEvent === 'connected') {
                                 console.log('流式连接确认');
                             } else if (currentEvent === 'done') {
-                                // 流结束，将内容转换为Markdown渲染
                                 if (assistantMessageElement) {
                                     assistantMessageElement.classList.remove('streaming');
                                     const messageContent = assistantMessageElement.querySelector('.message-content');
                                     if (messageContent) {
                                         messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                        // 高亮代码块
                                         this.highlightCodeBlocks(messageContent);
                                     }
                                 }
-                                // 保存流式消息到历史记录
                                 if (fullResponse) {
                                     this.currentChatHistory.push({
                                         type: 'assistant',
                                         content: fullResponse,
                                         timestamp: new Date().toISOString()
                                     });
-                                    // 如果当前对话是从历史记录加载的，更新历史记录
-                                    if (this.isCurrentChatFromHistory) {
-                                        this.updateCurrentChatHistory();
-                                        this.renderChatHistory();
-                                    }
+                                    this.autoSaveAndRenderHistory();
                                 }
                                 return;
                             }
@@ -773,28 +767,21 @@ class FoSentinelAgentApp {
                         } else if (line.startsWith('data: ')) {
                             const data = line.substring(6);
                             if (data === '[DONE]') {
-                                // 流结束标记，将内容转换为Markdown渲染
                                 if (assistantMessageElement) {
                                     assistantMessageElement.classList.remove('streaming');
                                     const messageContent = assistantMessageElement.querySelector('.message-content');
                                     if (messageContent) {
                                         messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                        // 高亮代码块
                                         this.highlightCodeBlocks(messageContent);
                                     }
                                 }
-                                // 保存流式消息到历史记录
                                 if (fullResponse) {
                                     this.currentChatHistory.push({
                                         type: 'assistant',
                                         content: fullResponse,
                                         timestamp: new Date().toISOString()
                                     });
-                                    // 如果当前对话是从历史记录加载的，更新历史记录
-                                    if (this.isCurrentChatFromHistory) {
-                                        this.updateCurrentChatHistory();
-                                        this.renderChatHistory();
-                                    }
+                                    this.autoSaveAndRenderHistory();
                                 }
                                 return;
                             }
@@ -1214,13 +1201,13 @@ class FoSentinelAgentApp {
         // 高亮代码块
         this.highlightCodeBlocks(messageContent);
         
-        // 保存到历史记录
         this.currentChatHistory.push({
             type: 'assistant',
             content: response,
             timestamp: new Date().toISOString()
         });
-        
+        this.autoSaveAndRenderHistory();
+
         this.scrollToBottom();
         return messageElement;
     }

@@ -83,8 +83,8 @@ func buildIntoIndex(ctx context.Context, path string) error {
 		return err
 	}
 
-	// 步骤3: 连接Milvus向量数据库
-	cli, err := client.NewMilvusClient(ctx)
+	// 步骤3: 获取全局单例 Milvus 客户端（进程内复用，无重复建连开销）
+	cli, err := client.GetMilvusClient(ctx)
 	if err != nil {
 		return err
 	}

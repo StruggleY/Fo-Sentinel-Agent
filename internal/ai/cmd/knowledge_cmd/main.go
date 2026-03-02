@@ -45,7 +45,8 @@ func main() {
 		if err != nil {
 			return err
 		}
-		cli, err := client.NewMilvusClient(ctx)
+		// GetMilvusClient 在同一进程内复用单例，循环多个文件时不重复建连
+		cli, err := client.GetMilvusClient(ctx)
 		if err != nil {
 			return err
 		}

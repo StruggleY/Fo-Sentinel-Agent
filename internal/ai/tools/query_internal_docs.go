@@ -4,6 +4,7 @@ import (
 	"Fo-Sentinel-Agent/internal/ai/retriever"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -19,17 +20,17 @@ func NewQueryInternalDocsTool() tool.InvokableTool {
 		"query_internal_docs",
 		"Use this tool to search internal documentation and knowledge base for relevant information. It performs RAG (Retrieval-Augmented Generation) to find similar documents and extract processing steps. This is useful when you need to understand internal procedures, best practices, or step-by-step guides stored in the company's documentation.",
 		func(ctx context.Context, input *QueryInternalDocsInput, opts ...tool.Option) (output string, err error) {
-			rr, err := retriever.NewMilvusRetriever(ctx)
+			// GetRetriever 使用单例，第一次调用时初始化连接，后续直接复用，无重复建连开销。
+			rr, err := retriever.GetRetriever(ctx)
 			if err != nil {
-				log.Fatal(err)
+				return "", fmt.Errorf("init retriever: %w", err)
 			}
 			resp, err := rr.Retrieve(ctx, input.Query)
 			if err != nil {
-				log.Fatal(err)
+				return "", fmt.Errorf("retrieve docs: %w", err)
 			}
 			respBytes, _ := json.Marshal(resp)
-			output = string(respBytes)
-			return output, nil
+			return string(respBytes), nil
 		})
 	if err != nil {
 		log.Fatal(err)

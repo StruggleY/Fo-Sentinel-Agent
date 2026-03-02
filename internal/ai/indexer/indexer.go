@@ -15,7 +15,7 @@ import (
 //   - 字段定义统一引用 common.CollectionFields（单一事实来源），
 //     与 client.go 建表时使用的 Schema 完全一致，杜绝字段漂移
 func NewMilvusIndexer(ctx context.Context) (*milvus.Indexer, error) {
-	cli, err := client.NewMilvusClient(ctx)
+	cli, err := client.GetMilvusClient(ctx)
 	if err != nil {
 		return nil, err
 	}

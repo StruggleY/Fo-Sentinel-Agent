@@ -4,10 +4,31 @@ import (
 	"Fo-Sentinel-Agent/utility/common"
 	"context"
 	"fmt"
+	"sync"
 
 	cli "github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 )
+
+var (
+	globalClient  cli.Client
+	clientOnce    sync.Once
+	clientInitErr error
+)
+
+// GetMilvusClient 返回全局单例 Milvus 客户端（懒初始化，线程安全）。
+//
+// 进程生命周期内只执行一次完整初始化（TCP 握手、DB/Collection 元数据检查）。
+// 后续所有调用直接返回已建好的连接，适用于 RAG 查询、文件上传索引等高频写读场景。
+//
+// 注意：command-line 批量重建索引（knowledge_cmd）同一进程内也会复用此单例，
+// 避免每次循环重复建连。
+func GetMilvusClient(ctx context.Context) (cli.Client, error) {
+	clientOnce.Do(func() {
+		globalClient, clientInitErr = NewMilvusClient(ctx)
+	})
+	return globalClient, clientInitErr
+}
 
 // NewMilvusClient 创建并初始化一个连接到Milvus向量数据库的客户端
 // 该函数会完成以下操作:
