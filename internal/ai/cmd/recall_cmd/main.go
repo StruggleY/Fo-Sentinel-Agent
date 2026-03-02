@@ -12,7 +12,7 @@ func main() {
 	ctx := context.Background()
 
 	// 初始化基于 Milvus 的检索器，从向量数据库中做语义召回
-	r, err := retriever2.NewMilvusRetriever(ctx)
+	r, err := retriever2.GetRetriever(ctx)
 	if err != nil {
 		panic(err)
 	}

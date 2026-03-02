@@ -8,5 +8,5 @@ import (
 )
 
 func newRetriever(ctx context.Context) (rtr retriever.Retriever, err error) {
-	return retriever2.NewMilvusRetriever(ctx)
+	return retriever2.GetRetriever(ctx)
 }

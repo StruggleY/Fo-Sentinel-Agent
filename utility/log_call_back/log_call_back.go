@@ -22,6 +22,9 @@ func LogCallback(config *LogCallbackConfig) callbacks.Handler {
 
 	builder := callbacks.NewHandlerBuilder()
 	builder.OnStartFn(func(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
+		if info == nil {
+			return ctx
+		}
 		fmt.Printf("[view start]:[%s:%s:%s]\n", info.Component, info.Type, info.Name)
 		if config.Detail {
 			var b []byte
@@ -35,6 +38,9 @@ func LogCallback(config *LogCallbackConfig) callbacks.Handler {
 		return ctx
 	})
 	builder.OnEndFn(func(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
+		if info == nil {
+			return ctx
+		}
 		fmt.Printf("[view end]:[%s:%s:%s]\n", info.Component, info.Type, info.Name)
 		return ctx
 	})

@@ -19,8 +19,7 @@ var FileDir = "./docs/"
 //
 // 向量类型选择说明：
 //   - 使用 FloatVector(2048) 而非 BinaryVector(65536)：
-//     text-embedding-v4 输出 float32 向量，BinaryVector 存储后 Milvus 按 HAMMING 距离
-//     对 float 原始二进制位求异或，与语义相似度无关，检索准确率极低。
+//     text-embedding-v4 输出 float32 向量，BinaryVector 存储后 Milvus 按 HAMMING 距离对 float 原始二进制位求异或，与语义相似度无关，检索准确率较低。
 //   - 配合 COSINE 度量，float 向量的余弦相似度才能真实反映语义距离。
 var CollectionFields = []*entity.Field{
 	{
