@@ -10,18 +10,18 @@ logger:
   stdout: true
 
 ds_think_chat_model:
-  api_key: "e0891aaf-3305-44ed-9b5b-56f800e171d3"
+  api_key: "火山引擎 api key"
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   model: "deepseek-v3-1-terminus"
 
 ds_quick_chat_model:
-  api_key: "e0891aaf-3305-44ed-9b5b-56f800e171d3"
+  api_key: "火山引擎 api key"
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   model: "deepseek-v3-1-terminus"
 
 doubao_embedding_model:
-  api_key: "sk-ccb4e6c8f65f478b9ac539f5361446ce"
+  api_key: "阿里百炼 api key"
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
   model: "text-embedding-v4"
 
-file_dir: "d:/GoProject/Fo-Sentinel-Agent/docs"
+file_dir: "xxx/Fo-Sentinel-Agent/docs"

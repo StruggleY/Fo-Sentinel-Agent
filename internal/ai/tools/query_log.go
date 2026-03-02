@@ -20,7 +20,7 @@ https://mcp-go.dev/clients
 */
 func GetLogMcpTool() ([]tool.BaseTool, error) {
 	// https://mcp-api.tencent-cloud.com/sse/XXXX
-	mcp_url := "https://mcp-api.tencent-cloud.com/sse/17f49ffee6f3a299"
+	mcp_url := ""
 	if mcp_url == "" {
 		panic("要使用GetLogMcpTool，请先按照教程申请mcp url")
 	}
