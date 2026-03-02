@@ -83,12 +83,13 @@ func NewMilvusClient(ctx context.Context) (cli.Client, error) {
 	}
 
 	if !bizCollectionExists {
-		// 如果集合不存在,需要创建它
-		// 首先定义集合的schema(结构定义),包括字段信息
+		// 如果集合不存在，则创建它。
+		// Schema 字段统一使用 common.CollectionFields（单一事实来源），
+		// 与 indexer.go 共享同一份定义，避免两处独立维护导致字段漂移。
 		schema := &entity.Schema{
-			CollectionName: common.MilvusCollectionName,     // 集合名称
-			Description:    "Business knowledge collection", // 集合描述:业务知识集合
-			Fields:         fields,                          // 字段定义(在文件底部定义)
+			CollectionName: common.MilvusCollectionName,
+			Description:    "Business knowledge collection",
+			Fields:         common.CollectionFields,
 		}
 
 		// 创建集合,使用默认的分片数量
@@ -97,12 +98,10 @@ func NewMilvusClient(ctx context.Context) (cli.Client, error) {
 			return nil, fmt.Errorf("failed to create biz collection: %w", err)
 		}
 
-		// 只为vector字段创建索引
-		// 注意:
-		// - id字段是主键,Milvus会自动为其创建索引,无需手动创建
-		// - content字段是VarChar类型,不是向量,不需要向量索引
-		// - 只有vector字段才需要向量索引,因为它用于相似度搜索
-		vectorIndex, err := entity.NewIndexAUTOINDEX(entity.HAMMING)
+		// 只为 vector 字段创建索引。
+		// 使用 COSINE 度量：FloatVector 的余弦相似度能真实反映语义距离，
+		// 比 HAMMING（二进制异或）更适合文本 Embedding 的相似度检索。
+		vectorIndex, err := entity.NewIndexAUTOINDEX(entity.COSINE)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create vector index: %w", err)
 		}
@@ -132,39 +131,4 @@ func NewMilvusClient(ctx context.Context) (cli.Client, error) {
 
 	// 返回已配置好的agent数据库客户端
 	return agentClient, nil
-}
-
-// fields 定义了业务知识集合(biz collection)的字段结构
-// 这个schema定义了如何存储和检索业务知识向量数据
-var fields = []*entity.Field{
-	{
-		// id字段: 主键字段,用于唯一标识每条记录
-		Name:     "id",
-		DataType: entity.FieldTypeVarChar, // 可变长度字符串类型
-		TypeParams: map[string]string{
-			"max_length": "256", // 最大长度256个字符
-		},
-		PrimaryKey: true, // 标记为主键
-	},
-	{
-		// vector字段: 存储文档的向量表示(embeddings)
-		Name:     "vector",
-		DataType: entity.FieldTypeBinaryVector, // 二进制向量类型,节省存储空间
-		TypeParams: map[string]string{
-			"dim": "65536", // 向量维度为65536维(相当于8192字节的二进制向量)
-		},
-	},
-	{
-		// content字段: 存储原始文本内容
-		Name:     "content",
-		DataType: entity.FieldTypeVarChar, // 可变长度字符串类型
-		TypeParams: map[string]string{
-			"max_length": "8192", // 最大长度8192个字符
-		},
-	},
-	{
-		// metadata字段: 存储额外的元数据信息(如来源、时间戳等)
-		Name:     "metadata",
-		DataType: entity.FieldTypeJSON, // JSON类型,可以存储任意结构化数据
-	},
 }
