@@ -15,6 +15,7 @@ class FoSentinelAgentApp {
         this.initMarkdown();
         this.checkAndSetCentered();
         this.renderChatHistory();
+        this.restoreSidebarState();
     }
 
     // 初始化Markdown配置
@@ -95,7 +96,10 @@ class FoSentinelAgentApp {
     // 初始化DOM元素
     initializeElements() {
         // 侧边栏元素
-        this.sidebar = document.querySelector('.sidebar');
+        this.sidebar = document.getElementById('sidebar');
+        this.sidebarToggleBtn = document.getElementById('sidebarToggleBtn');   // 收缩态面板图标
+        this.sidebarCollapseBtn = document.getElementById('sidebarCollapseBtn'); // 展开态收起按钮
+        this.newChatBtnIcon = document.getElementById('newChatBtnIcon');         // 收缩态新建图标
         this.newChatBtn = document.getElementById('newChatBtn');
         this.aiOpsSidebarBtn = document.getElementById('aiOpsSidebarBtn');
         
@@ -123,6 +127,19 @@ class FoSentinelAgentApp {
 
     // 绑定事件监听器
     bindEvents() {
+        // 侧边栏切换：收缩态面板图标 / 展开态收起按钮
+        if (this.sidebarToggleBtn) {
+            this.sidebarToggleBtn.addEventListener('click', () => this.toggleSidebar());
+        }
+        if (this.sidebarCollapseBtn) {
+            this.sidebarCollapseBtn.addEventListener('click', () => this.toggleSidebar());
+        }
+
+        // 收缩态新建对话图标
+        if (this.newChatBtnIcon) {
+            this.newChatBtnIcon.addEventListener('click', () => this.newChat());
+        }
+
         // 新建对话
         if (this.newChatBtn) {
             this.newChatBtn.addEventListener('click', () => this.newChat());
@@ -223,6 +240,26 @@ class FoSentinelAgentApp {
                 wrapper.classList.remove('active');
             }
         }
+    }
+
+    // 切换侧边栏收缩/展开
+    toggleSidebar() {
+        if (this.sidebar) {
+            const isCollapsed = this.sidebar.classList.toggle('collapsed');
+            try {
+                localStorage.setItem('sidebarCollapsed', isCollapsed ? '1' : '0');
+            } catch (e) {}
+        }
+    }
+
+    // 恢复侧边栏状态
+    restoreSidebarState() {
+        try {
+            const collapsed = localStorage.getItem('sidebarCollapsed');
+            if (collapsed === '1' && this.sidebar) {
+                this.sidebar.classList.add('collapsed');
+            }
+        } catch (e) {}
     }
 
     // 新建对话

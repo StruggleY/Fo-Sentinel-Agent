@@ -14,28 +14,54 @@
 <body>
     <div class="app-layout">
         <!-- 左侧边栏 -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <h2 class="sidebar-title">智能OnCall助手</h2>
-            </div>
-            
-            <div class="sidebar-content">
-                <button class="new-chat-btn" id="newChatBtn">
+        <aside class="sidebar" id="sidebar">
+            <!-- 收缩状态：图标列（第二图样式：顶部分栏图标+下方加号） -->
+            <div class="sidebar-icons-col">
+                <button class="sidebar-icon-btn sidebar-icon-panel" id="sidebarToggleBtn" data-tooltip="打开边栏">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="3" y="3" width="18" height="18" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
+                        <path d="M9 3V21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    </svg>
+                </button>
+                <button class="sidebar-icon-btn" id="newChatBtnIcon" data-tooltip="新建对话">
                     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
-                    <span>新建对话</span>
                 </button>
-                
-                <div class="chat-history-section">
-                    <div class="history-header">
-                        <span>近期对话</span>
+            </div>
+
+            <!-- 展开状态：完整侧边栏内容 -->
+            <div class="sidebar-full">
+                <div class="sidebar-header">
+                    <div class="sidebar-logo-title">
+                        <!-- 只保留标题文字 -->
+                        <h2 class="sidebar-title">智能OnCall助手</h2>
                     </div>
-                    <div class="chat-history-list" id="chatHistoryList">
-                        <!-- 历史对话列表将在这里动态生成 -->
+                    <button class="sidebar-toggle-btn" id="sidebarCollapseBtn" data-tooltip="收起边栏">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="3" y="3" width="18" height="18" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
+                            <path d="M9 3V21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="sidebar-content">
+                    <button class="new-chat-btn" id="newChatBtn">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <span>新建对话</span>
+                    </button>
+
+                    <div class="chat-history-section">
+                        <div class="history-header">
+                            <span>近期对话</span>
+                        </div>
+                        <div class="chat-history-list" id="chatHistoryList">
+                            <!-- 历史对话列表将在这里动态生成 -->
+                        </div>
                     </div>
                 </div>
-                
             </div>
         </aside>
 

@@ -26,24 +26,189 @@ body {
     width: 240px;
     background: #e8f0fe;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     border-right: 1px solid #dadce0;
+    transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    flex-shrink: 0;
+    position: relative;
 }
 
-.sidebar-header {
-    padding: 16px;
+/* 收缩状态 */
+.sidebar.collapsed {
+    width: 56px;
+    overflow: visible; /* 让「打开边栏」等 tooltip 能显示在侧栏右侧 */
+}
+
+/* ── 图标列（收缩时可见） ── */
+.sidebar-icons-col {
+    width: 56px;
+    flex-shrink: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+    gap: 4px;
+}
+
+.sidebar.collapsed .sidebar-icons-col {
+    display: flex;
+}
+
+/* 图标按钮（收缩状态）：与侧栏同色圆角底 */
+.sidebar-icon-btn {
+    width: 40px;
+    height: 40px;
+    background: #e8f0fe;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-    gap: 12px;
+    justify-content: center;
+    color: #202124;
+    transition: background 0.15s, color 0.15s;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.sidebar-icon-btn:hover {
+    background: #d2e3fc;
+    color: #202124;
+}
+
+.sidebar-icon-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* Tooltip 气泡（收缩状态悬浮提示，与「收起边栏」同款：深底白字圆角） */
+.sidebar-icon-btn::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #2d3238;
+    color: #ffffff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 9999;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.sidebar-icon-btn:hover::after {
+    opacity: 1;
+}
+
+/* ── 完整侧边栏（展开时可见） ── */
+.sidebar-full {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    opacity: 1;
+    transition: opacity 0.15s ease;
+}
+
+.sidebar.collapsed .sidebar-full {
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    overflow: hidden;
+}
+
+/* 头部 */
+.sidebar-header {
+    padding: 10px 12px 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     border-bottom: 1px solid #dadce0;
+    min-height: 56px;
+    flex-shrink: 0;
+}
+
+.sidebar-logo-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    overflow: hidden;
+    flex: 1;
+}
+
+.sidebar-logo {
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
 }
 
 .sidebar-title {
-    font-size: 16px;
-    font-weight: 500;
+    font-size: 15px;
+    font-weight: 600;
     color: #202124;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 展开状态右上角收缩按钮 */
+.sidebar-toggle-btn {
+    width: 36px;
+    height: 36px;
+    background: #e8f0fe;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #202124;
+    flex-shrink: 0;
+    position: relative;
+    transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-toggle-btn:hover {
+    background: #d2e3fc;
+    color: #202124;
+}
+
+.sidebar-toggle-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* Tooltip for collapse button（与打开边栏同款：深底白字圆角） */
+.sidebar-toggle-btn::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    background: #2d3238;
+    color: #ffffff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 2000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.sidebar-toggle-btn:hover::after {
+    opacity: 1;
 }
 
 .sidebar-content {
@@ -52,12 +217,13 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    overflow: hidden;
 }
 
 .new-chat-btn {
     width: 100%;
     padding: 12px;
-    background: none;
+    background: #e8f0fe;
     border: none;
     border-radius: 12px;
     cursor: pointer;
@@ -73,7 +239,7 @@ body {
 }
 
 .new-chat-btn:hover {
-    background: #f1f3f4;
+    background: #d2e3fc;
 }
 
 .new-chat-btn svg {
@@ -145,14 +311,15 @@ body {
     display: flex;
     align-items: center;
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s;
     position: relative;
+    background: #e8f0fe;
 }
 
 .history-item:hover {
-    background: #f1f3f4;
+    background: #d2e3fc;
 }
 
 .history-item-content {
@@ -208,6 +375,11 @@ body {
     background: #ffffff;
     overflow: hidden;
     position: relative;
+}
+
+/* 收缩态顶部面板按钮与其它图标按钮共用 .sidebar-icon-btn 的 #e8f0fe，此处仅保留 hover 一致 */
+.sidebar-icon-panel:hover {
+    background: #d2e3fc !important;
 }
 
 /* AI Ops按钮 - 右上角 */
@@ -282,6 +454,7 @@ body {
     max-width: 800px;
     margin: 0 auto;
     min-height: auto;
+    padding: 16px 24px 20px;
 }
 
 .chat-container.centered .chat-input-container {
@@ -290,6 +463,8 @@ body {
     width: 100%;
     position: relative;
     flex-shrink: 0;
+    padding-top: 0;
+    margin-top: 4px;
 }
 
 .chat-container:not(.centered) .chat-messages {
@@ -315,6 +490,11 @@ body {
     opacity: 1;
     visibility: visible;
     order: -1;
+    padding: 12px 20px 8px;
+}
+
+.chat-container.centered .welcome-greeting + .chat-messages {
+    padding-top: 8px;
 }
 
 .chat-container:not(.centered) .welcome-greeting {
@@ -592,7 +772,7 @@ body {
 
 /* 输入区域 */
 .chat-input-container {
-    padding: 20px;
+    padding: 14px 20px 18px;
     background: #ffffff;
     display: flex;
     align-items: flex-end;
@@ -696,7 +876,7 @@ body {
     border-radius: 24px;
     background: #ffffff;
     transition: all 0.2s;
-    padding: 12px 16px;
+    padding: 8px 14px 10px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
@@ -709,8 +889,8 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 8px;
-    padding-top: 8px;
+    margin-top: 4px;
+    padding-top: 4px;
 }
 
 .right-actions {
@@ -727,8 +907,9 @@ body {
     color: #202124;
     background: transparent;
     font-weight: 400;
-    padding: 0;
-    min-height: 24px;
+    padding: 2px 0;
+    min-height: 22px;
+    line-height: 1.4;
 }
 
 .message-input::placeholder {
