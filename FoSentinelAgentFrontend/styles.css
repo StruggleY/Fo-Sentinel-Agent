@@ -152,7 +152,7 @@ body {
 }
 
 .sidebar-title {
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 600;
     color: #202124;
     white-space: nowrap;
@@ -232,7 +232,7 @@ body {
     justify-content: flex-start;
     gap: 12px;
     color: #202124;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 500;
     transition: all 0.3s ease;
     position: relative;
@@ -294,7 +294,7 @@ body {
 
 .history-header {
     padding: 8px 12px;
-    font-size: 12px;
+    font-size: 16px;
     font-weight: 600;
     color: #5f6368;
     text-transform: uppercase;
@@ -330,7 +330,7 @@ body {
 }
 
 .history-item-title {
-    font-size: 14px;
+    font-size: 15px;
     color: #202124;
     white-space: nowrap;
     overflow: hidden;
