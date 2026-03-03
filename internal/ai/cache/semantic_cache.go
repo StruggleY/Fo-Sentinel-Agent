@@ -21,10 +21,11 @@ import (
 )
 
 const (
-	DefaultTopK      = 1
+	DefaultTopK      = 3 // 默认每次从 Milvus 召回 3 个候选块
 	DefaultTTL       = 24 * time.Hour
 	DefaultThreshold = 0.85
 	DefaultKeyPrefix = "rag:cache"
+	DefaultMinScore  = 0.30 // 默认最低相似度阈值，低于此值的召回块会被过滤
 )
 
 type Config struct {
@@ -32,6 +33,7 @@ type Config struct {
 	Threshold float64       // 余弦相似度命中阈值，取值 (0,1]
 	TopK      int           // Milvus 每次召回的文档数量
 	KeyPrefix string        // Redis Key 前缀，用于业务隔离
+	MinScore  float64       // 召回结果最低相似度阈值，低于此值的块在返回前被过滤
 }
 
 // cacheEntry JSON 序列化后存入 Redis。
@@ -84,6 +86,9 @@ func (sc *semanticCache) get(ctx context.Context, vec []float64) (docs []*schema
 		data, err := sc.client.Get(ctx, sc.entryKey(id)).Bytes()
 		if err != nil {
 			if errors.Is(err, goredis.Nil) {
+				// 条目 TTL 已到期被 Redis 删除，但 UUID 仍残留在 Set 中；
+				// 被动清理：SRem 负责清除 Set 内过期 UUID，
+				// 与 set() 中的 Expire 互补（Expire 防止 Set 本身永不过期）。
 				sc.client.SRem(ctx, sc.indexKey(), id)
 			}
 			continue
@@ -124,8 +129,13 @@ func (sc *semanticCache) set(ctx context.Context, vec []float64, docs []*schema.
 	id := uuid.New().String()
 
 	pipe := sc.client.Pipeline()
+	// 写内容 key：rag:cache:{uuid} = JSON(向量+文档)，24h 后 Redis 自动删除该 key
 	pipe.Set(ctx, sc.entryKey(id), data, sc.ttl)
+	// 写目录 key：向 rag:cache:idx（Set）追加成员 uuid，查询时通过 SMembers 遍历所有 uuid
 	pipe.SAdd(ctx, sc.indexKey(), id)
+	// 重置目录 key 的过期时间为 24h：Set 本身无 TTL 则永不消亡，每次写入重置，
+	// 确保长时间无新写入后 Set 最终被 Redis 清理，防止僵尸 UUID 无限累积。
+	pipe.Expire(ctx, sc.indexKey(), sc.ttl)
 	pipe.Exec(ctx)
 	g.Log().Debugf(ctx, "[SemanticCache] 写入新缓存条目 id=%s", id)
 }
@@ -179,19 +189,25 @@ type Retriever struct {
 	embedder  embedding.Embedder
 	cache     *semanticCache
 	topK      int
+	minScore  float64 // 召回结果最低相似度阈值
 }
 
-// New 创建 Retriever，TopK ≤ 0 时回落到 DefaultTopK。
+// New 创建 Retriever，TopK ≤ 0 时回落到 DefaultTopK，MinScore ≤ 0 时回落到 DefaultMinScore。
 func New(cli milvuscli.Client, eb embedding.Embedder, redisCli *goredis.Client, cfg Config) *Retriever {
 	topK := cfg.TopK
 	if topK <= 0 {
 		topK = DefaultTopK
+	}
+	minScore := cfg.MinScore
+	if minScore <= 0 {
+		minScore = DefaultMinScore
 	}
 	return &Retriever{
 		milvusCli: cli,
 		embedder:  eb,
 		cache:     newSemanticCache(redisCli, cfg),
 		topK:      topK,
+		minScore:  minScore,
 	}
 }
 
@@ -247,8 +263,17 @@ func (c *Retriever) Retrieve(ctx context.Context, query string, opts ...einoretr
 		return nil, err
 	}
 
-	c.cache.set(ctx, queryVec, docs)
-	return docs, nil
+	// 按相似度阈值过滤低相关块，避免将无关内容送入 LLM 上下文
+	filtered := make([]*schema.Document, 0, len(docs))
+	for _, doc := range docs {
+		if doc.Score() >= c.minScore {
+			filtered = append(filtered, doc)
+		}
+	}
+	g.Log().Infof(ctx, "[Retriever] Milvus 召回 %d 块，过滤后保留 %d 块（minScore=%.2f）", len(docs), len(filtered), c.minScore)
+
+	c.cache.set(ctx, queryVec, filtered)
+	return filtered, nil
 }
 
 // parseMilvusResult 将单条 SearchResult 映射为 []*schema.Document。

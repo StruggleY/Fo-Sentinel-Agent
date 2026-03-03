@@ -65,12 +65,15 @@ func readCacheConfig(ctx context.Context) cache.Config {
 	ttlHours, _ := g.Cfg().Get(ctx, "semantic_cache.ttl_hours")
 	threshold, _ := g.Cfg().Get(ctx, "semantic_cache.threshold")
 	keyPrefix, _ := g.Cfg().Get(ctx, "semantic_cache.key_prefix")
+	topK, _ := g.Cfg().Get(ctx, "semantic_cache.topk")
+	minScore, _ := g.Cfg().Get(ctx, "semantic_cache.min_score")
 
 	cfg := cache.Config{
 		TTL:       time.Duration(ttlHours.Int64()) * time.Hour,
 		Threshold: threshold.Float64(),
 		KeyPrefix: keyPrefix.String(),
-		TopK:      cache.DefaultTopK,
+		TopK:      topK.Int(),
+		MinScore:  minScore.Float64(),
 	}
 	if cfg.TTL <= 0 {
 		cfg.TTL = cache.DefaultTTL
@@ -80,6 +83,12 @@ func readCacheConfig(ctx context.Context) cache.Config {
 	}
 	if cfg.KeyPrefix == "" {
 		cfg.KeyPrefix = cache.DefaultKeyPrefix
+	}
+	if cfg.TopK <= 0 {
+		cfg.TopK = cache.DefaultTopK
+	}
+	if cfg.MinScore <= 0 {
+		cfg.MinScore = cache.DefaultMinScore
 	}
 	return cfg
 }

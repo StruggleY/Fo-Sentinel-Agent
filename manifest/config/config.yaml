@@ -3,6 +3,7 @@ server:
   address: ":8000"
   openapiPath: "/api.json"
   swaggerPath: "/swagger"
+  clientMaxBodySize: 52428800  # 50 MB，HTTP Body 硬限制，防止超大文件打爆内存
 
 # https://goframe.org/docs/core/glog-config
 logger:
@@ -26,4 +27,10 @@ doubao_embedding_model:
 
 file_dir: "xxx/Fo-Sentinel-Agent/docs"
 
+semantic_cache:
+  ttl_hours: 24
+  threshold: 0.85        # 语义缓存命中阈值（余弦相似度）
+  key_prefix: "rag:cache"
+  topk: 3                # Milvus 每次召回文档数（默认 3）
+  min_score: 0.30        # 召回结果最低相似度阈值，低于此值的块会被过滤
 
