@@ -7,9 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"Fo-Sentinel-Agent/api/chat/v1"
+	v1 "Fo-Sentinel-Agent/api/chat/v1"
 	"Fo-Sentinel-Agent/internal/ai/agent/knowledge_index_pipeline"
-	loader2 "Fo-Sentinel-Agent/internal/ai/loader"
 	"Fo-Sentinel-Agent/utility/client"
 	"Fo-Sentinel-Agent/utility/common"
 	"Fo-Sentinel-Agent/utility/log_call_back"
@@ -21,6 +20,10 @@ import (
 	"github.com/gogf/gf/v2/os/gfile"
 )
 
+// maxUploadBytes 单次上传文件大小上限（50 MB）
+// 在 HTTP 层拦截超大请求
+const maxUploadBytes int64 = 50 << 20 // 50 MB
+
 // FileUpload 处理文件上传并构建知识库索引
 func (c *ControllerV1) FileUpload(ctx context.Context, req *v1.FileUploadReq) (res *v1.FileUploadRes, err error) {
 	// 步骤1: 从请求上下文中获取上传的文件对象
@@ -28,6 +31,11 @@ func (c *ControllerV1) FileUpload(ctx context.Context, req *v1.FileUploadReq) (r
 	uploadFile := r.GetUploadFile("file")
 	if uploadFile == nil {
 		return nil, gerror.New("请上传文件")
+	}
+
+	// 步骤1.1: 校验文件大小，拒绝超过上限的文件，防止大文件 OOM
+	if uploadFile.Size > maxUploadBytes {
+		return nil, gerror.Newf("文件过大（%.1f MB），单次上传上限为 50 MB", float64(uploadFile.Size)/(1<<20))
 	}
 
 	// 步骤2: 检查并创建文件保存目录
@@ -72,48 +80,29 @@ func (c *ControllerV1) FileUpload(ctx context.Context, req *v1.FileUploadReq) (r
 func buildIntoIndex(ctx context.Context, path string) error {
 	// 步骤1: 构建知识库索引处理流水线
 	r, err := knowledge_index_pipeline.BuildKnowledgeIndexing(ctx)
-
-	// 步骤2: 创建文件加载器并加载文档
-	loader, err := loader2.NewFileLoader(ctx)
 	if err != nil {
-		return err
-	}
-	docs, err := loader.Load(ctx, document.Source{URI: path})
-	if err != nil {
-		return err
+		return fmt.Errorf("build knowledge indexing failed: %w", err)
 	}
 
-	// 步骤3: 获取全局单例 Milvus 客户端（进程内复用，无重复建连开销）
+	// 步骤2: 获取全局单例 Milvus 客户端（进程内复用，无重复建连开销）
 	cli, err := client.GetMilvusClient(ctx)
 	if err != nil {
 		return err
 	}
 
-	// 步骤4: 查询并删除相同源文件的旧索引数据(避免重复索引)
-	// 4.1 构造查询表达式：从metadata的JSON字段中查找_source字段匹配的记录
-	// 例如：metadata["_source"] == "/data/files/document.pdf"
-	// _source记录了文档的原始文件路径，同一个文件可能被多次上传
-	expr := fmt.Sprintf(`metadata["_source"] == "%s"`, docs[0].MetaData["_source"])
+	// 步骤3: 查询并删除相同源文件的旧索引数据（避免重复索引）
+	// _source 即文件路径，eino FileLoader 写入 metadata 时以 URI 作为 _source 值。
+	expr := fmt.Sprintf(`metadata["_source"] == "%s"`, path)
 
-	// 4.2 执行查询操作
-	// 参数说明：
-	//   - common.MilvusCollectionName: 集合名称(biz)
-	//   - []: 不指定分区(partition)，查询整个集合
-	//   - expr: 过滤表达式，只查找_source匹配的记录
-	//   - []string{"id"}: 只返回id字段，减少数据传输量
+	// 3.1 只返回 id 字段，减少网络传输量
 	queryResult, err := cli.Query(ctx, common.MilvusCollectionName, []string{}, expr, []string{"id"})
 	if err != nil {
 		return err
 	} else if len(queryResult) > 0 {
-		// 查询结果不为空，说明该文件之前已经被索引过
-
-		// 步骤4.3: 从查询结果中提取所有待删除记录的ID
-		// Milvus查询返回的是列式数据结构(Column)，不是行式
+		// 3.2 从列式结果中提取所有待删除的 ID
 		var idsToDelete []string
 		for _, column := range queryResult {
-			// 遍历所有返回的列，找到名为"id"的列
 			if column.Name() == "id" {
-				// 遍历该列的所有行，提取每个id值
 				for i := 0; i < column.Len(); i++ {
 					id, err := column.GetAsString(i)
 					if err == nil {
@@ -123,28 +112,19 @@ func buildIntoIndex(ctx context.Context, path string) error {
 			}
 		}
 
-		// 步骤4.4: 批量删除旧记录(清理历史数据)
+		// 3.3 批量删除旧记录，使用 IN 操作符比逐条删除高效
 		if len(idsToDelete) > 0 {
-			// 构造删除表达式：id in ["uuid1","uuid2","uuid3"]
-			// 使用IN操作符批量删除，比逐条删除高效
 			deleteExpr := fmt.Sprintf(`id in ["%s"]`, strings.Join(idsToDelete, `","`))
 			err = cli.Delete(ctx, common.MilvusCollectionName, "", deleteExpr)
 			if err != nil {
-				// 删除失败只警告，不中断流程(降级处理)
 				fmt.Printf("[warn] delete existing data failed: %v\n", err)
 			} else {
-				// 删除成功，记录日志
-				fmt.Printf("[info] deleted %d existing records with _source: %s\n", len(idsToDelete), docs[0].MetaData["_source"])
+				fmt.Printf("[info] deleted %d existing records with _source: %s\n", len(idsToDelete), path)
 			}
 		}
 	}
 
-	// 步骤5: 执行索引构建流水线，生成向量并存储到Milvus
-	// 调用之前构建好的知识索引处理流水线
-	// 流程：FileLoader(加载文档) -> MarkdownSplitter(分块) -> MilvusIndexer(向量化+存储)
-	// 参数说明：
-	//   - document.Source{URI: path}: 输入文档路径
-	//   - compose.WithCallbacks: 添加日志回调，记录处理过程
+	// 步骤4: 执行索引构建流水线（FileLoader → MarkdownSplitter → MilvusIndexer）
 	ids, err := r.Invoke(ctx, document.Source{URI: path}, compose.WithCallbacks(log_call_back.LogCallback(nil)))
 	if err != nil {
 		return fmt.Errorf("invoke index graph failed: %w", err)
