@@ -12,7 +12,6 @@ import (
 	"Fo-Sentinel-Agent/internal/ai/cache"
 	"Fo-Sentinel-Agent/internal/ai/embedder"
 	"Fo-Sentinel-Agent/utility/client"
-	"Fo-Sentinel-Agent/utility/rediscli"
 )
 
 var (
@@ -26,12 +25,12 @@ var (
 // 进程生命周期内只执行一次初始化：建立 Milvus TCP 连接、建立 Redis 连接、
 // 创建 Embedding 客户端、从配置文件读取语义缓存参数。
 //
-// 语义缓存参数从 config.yaml semantic_cache 节读取，常量作为缺省兜底值：
-//   - max_size   cache.DefaultMaxSize  = 200 条
-//   - ttl_hours  cache.DefaultTTL      = 24 小时
+// 语义缓存参数从 config.yaml redis.semantic_cache 节读取，常量作为缺省兜底值：
+//   - ttl        cache.DefaultTTL      = 24 小时
 //   - threshold  cache.DefaultThreshold = 0.85
 //   - key_prefix cache.DefaultKeyPrefix = "rag:cache"
-//   - topK       cache.DefaultTopK     = 1
+//   - topk       cache.DefaultTopK     = 3
+//   - min_score  cache.DefaultMinScore = 0.30
 func GetRetriever(ctx context.Context) (einoretriever.Retriever, error) {
 	once.Do(func() {
 		// 复用全局单例 Milvus 客户端，避免重复建立 TCP 连接。
@@ -48,7 +47,7 @@ func GetRetriever(ctx context.Context) (einoretriever.Retriever, error) {
 			return
 		}
 		// Redis 单例客户端，语义缓存的持久化存储。
-		redisCli, err := rediscli.GetRedisClient(ctx)
+		redisCli, err := client.GetRedisClient(ctx)
 		if err != nil {
 			initErr = err
 			return
@@ -60,13 +59,13 @@ func GetRetriever(ctx context.Context) (einoretriever.Retriever, error) {
 	return globalRetriever, initErr
 }
 
-// readCacheConfig 从配置文件 semantic_cache 节读取缓存参数，缺失时回落到默认常量。
+// readCacheConfig 从配置文件 redis.semantic_cache 节读取缓存参数，缺失时回落到默认常量。
 func readCacheConfig(ctx context.Context) cache.Config {
-	ttlHours, _ := g.Cfg().Get(ctx, "semantic_cache.ttl_hours")
-	threshold, _ := g.Cfg().Get(ctx, "semantic_cache.threshold")
-	keyPrefix, _ := g.Cfg().Get(ctx, "semantic_cache.key_prefix")
-	topK, _ := g.Cfg().Get(ctx, "semantic_cache.topk")
-	minScore, _ := g.Cfg().Get(ctx, "semantic_cache.min_score")
+	ttlHours, _ := g.Cfg().Get(ctx, "redis.semantic_cache.ttl")
+	threshold, _ := g.Cfg().Get(ctx, "redis.semantic_cache.threshold")
+	keyPrefix, _ := g.Cfg().Get(ctx, "redis.semantic_cache.key_prefix")
+	topK, _ := g.Cfg().Get(ctx, "redis.semantic_cache.topk")
+	minScore, _ := g.Cfg().Get(ctx, "redis.semantic_cache.min_score")
 
 	cfg := cache.Config{
 		TTL:       time.Duration(ttlHours.Int64()) * time.Hour,

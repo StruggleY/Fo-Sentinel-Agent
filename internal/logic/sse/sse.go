@@ -62,6 +62,19 @@ func (s *Service) Create(ctx context.Context, r *ghttp.Request) (*Client, error)
 		messageChan: make(chan string, 100),
 	}
 
+	// 注册客户端到全局 Map，支持服务端主动向指定会话推送消息（如工具执行进度通知）
+	s.clients.Set(client.Id, client)
+
+	// 监听 ctx.Done() 自动注销客户端，防止 goroutine 泄漏和僵尸连接
+	go func() {
+		<-ctx.Done()
+		s.clients.Remove(client.Id)
+	}()
+
+	// 启动消息推送 goroutine，从 messageChan 消费并写入 HTTP Response
+	// 解耦 LLM 生成速度与网络发送速度，防止背压阻塞 ReAct 主循环
+	client.StartPusher(ctx)
+
 	// 立即向客户端推送 connected 事件，告知连接已建立。
 	// Flush() 强制将缓冲区数据立即写入 TCP，否则数据可能在缓冲区滞留，客户端无法及时收到。
 	r.Response.Writefln("id: %s", clientId)
@@ -71,7 +84,27 @@ func (s *Service) Create(ctx context.Context, r *ghttp.Request) (*Client, error)
 	return client, nil
 }
 
-// SendToClient 向客户端推送一条 SSE 事件。
+// StartPusher 启动后台 goroutine，从 messageChan 消费消息并写入 HTTP Response。
+//
+// 设计原理：
+//   - LLM 流式输出速度 >> 网络发送速度时，若同步写 response 会产生背压阻塞 ReAct 循环
+//   - 通过 channel 解耦：SendToClient 非阻塞写入 channel，pusher goroutine 独立消费
+//   - channel buffer=100，若填满则 SendToClient 丢弃（背压保护，不影响 LLM 推理）
+func (c *Client) StartPusher(ctx context.Context) {
+	go func() {
+		for {
+			select {
+			case msg := <-c.messageChan:
+				c.Request.Response.Writefln(msg)
+				c.Request.Response.Flush()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// SendToClient 向客户端推送一条 SSE 事件（非阻塞，写入 messageChan）。
 //
 // SSE 事件格式（每字段独占一行，事件以空行结尾）：
 //
@@ -86,13 +119,45 @@ func (s *Service) Create(ctx context.Context, r *ghttp.Request) (*Client, error)
 //   - "error"   ── 推理过程发生异常
 //
 // id 使用纳秒时间戳，确保每条事件 ID 唯一，客户端断线重连时可凭 Last-Event-ID 续接。
+//
+// 返回值：true=成功写入 channel，false=channel 满（背压保护，丢弃该消息）
 func (c *Client) SendToClient(eventType, data string) bool {
 	msg := fmt.Sprintf(
 		"id: %d\nevent: %s\ndata: %s\n\n",
 		time.Now().UnixNano(), eventType, data,
 	)
-	// Flush() 确保每条事件立即推送到客户端，而不是积攒在 HTTP 响应缓冲区等待凑满再发
-	c.Request.Response.Writefln(msg)
+	// 非阻塞写入 channel，满时丢弃（不阻塞 LLM 推理主循环）
+	select {
+	case c.messageChan <- msg:
+		return true
+	default:
+		return false // channel 满，背压保护
+	}
+}
+
+// SendHeartbeat 发送 SSE 心跳注释行（浏览器忽略，但保持 TCP 连接活跃）。
+//
+// 用途：
+//   - Nginx/代理服务器通常在 60s 无数据时断开长连接
+//   - ReAct 工具调用（如日志查询）可能耗时较长，此时 SSE 连接无数据输出
+//   - 定时发送心跳注释行（`: keepalive\n\n`），防止代理超时断连
+//
+// 调用频率：建议 15s 一次（低于代理超时时间即可）
+func (c *Client) SendHeartbeat() {
+	c.Request.Response.Writefln(": keepalive\n")
 	c.Request.Response.Flush()
-	return true
+}
+
+// PushToClient 向指定 client_id 的会话主动推送消息（供服务端内部调用）。
+//
+// 用途：
+//   - 工具执行进度通知（如"正在查询日志..."）
+//   - 后台任务完成通知
+//
+// 返回值：true=推送成功，false=该 client_id 不存在或已断线
+func (s *Service) PushToClient(clientId, eventType, data string) bool {
+	if v := s.clients.Get(clientId); v != nil {
+		return v.(*Client).SendToClient(eventType, data)
+	}
+	return false
 }

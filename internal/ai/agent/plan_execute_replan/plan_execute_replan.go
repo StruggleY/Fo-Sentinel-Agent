@@ -3,14 +3,65 @@ package plan_execute_replan
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/cloudwego/eino-examples/adk/common/prints"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/prebuilt/planexecute"
 )
 
+var (
+	globalPlanExecAgent   adk.Agent
+	globalPlanExecOnce    sync.Once
+	globalPlanExecInitErr error
+)
+
+// getPlanExecuteAgent 返回全局缓存的 Plan-Execute-Replan Agent（懒初始化，线程安全）。
+//
+// 进程生命周期内只执行一次 Agent 组装（Planner+Executor+Replanner → planexecute.New），
+// 所有并发请求复用同一个 Agent 实例（adk.NewRunner 每次新建是正确的，因为 Runner 持有查询状态）。
+func getPlanExecuteAgent(ctx context.Context) (adk.Agent, error) {
+	globalPlanExecOnce.Do(func() {
+		initCtx := context.Background()
+
+		// Planner：任务拆解（深度思考模型，运行一次）
+		planAgent, err := NewPlanner(initCtx)
+		if err != nil {
+			globalPlanExecInitErr = fmt.Errorf("init Planner: %w", err)
+			return
+		}
+
+		// Executor：执行当前步骤（快速响应模型，ReAct 循环工具调用）
+		executeAgent, err := NewExecutor(initCtx)
+		if err != nil {
+			globalPlanExecInitErr = fmt.Errorf("init Executor: %w", err)
+			return
+		}
+
+		// Replanner：评估执行结果并决策继续/终止（深度思考模型）
+		replanAgent, err := NewRePlanAgent(initCtx)
+		if err != nil {
+			globalPlanExecInitErr = fmt.Errorf("init Replanner: %w", err)
+			return
+		}
+
+		// planexecute.New 在底层组合为：SequentialAgent[Planner, LoopAgent[Executor, Replanner]]
+		// MaxIterations:20 是 LoopAgent 的循环上限，即 Executor+Replanner 最多交替执行 20 轮
+		globalPlanExecAgent, globalPlanExecInitErr = planexecute.New(initCtx, &planexecute.Config{
+			Planner:       planAgent,
+			Executor:      executeAgent,
+			Replanner:     replanAgent,
+			MaxIterations: 20,
+		})
+	})
+	return globalPlanExecAgent, globalPlanExecInitErr
+}
+
 // BuildPlanAgent 组装 Planner / Executor / Replanner 三个角色，
 // 驱动完整的 Plan-Execute-Replan 循环，阻塞直到任务完成后返回最终结果。
+//
+// 注意：此函数保持原有签名不变（接受 query 参数并立即运行），调用方无感知内部缓存优化。
+// 内部改为复用缓存的 Agent，仅 adk.NewRunner 是每次新建（正确，因为 Runner 持有查询状态）。
 //
 // ── 底层 Agent 组合结构（planexecute.New 内部实现）──────────────────────────
 //
@@ -43,39 +94,17 @@ import (
 //	string  ：最终回答（Replanner 调用 RespondTool 时输出的 response 字段）
 //	[]string：所有步骤的中间输出列表，供前端展示执行过程或后端审计
 func BuildPlanAgent(ctx context.Context, query string) (string, []string, error) {
-	// Planner
-	planAgent, err := NewPlanner(ctx)
+	// 复用全局缓存的 Agent（Planner+Executor+Replanner 已组装完毕）
+	agent, err := getPlanExecuteAgent(ctx)
 	if err != nil {
-		return "", []string{}, err
-	}
-	// Executor
-	executeAgent, err := NewExecutor(ctx)
-	if err != nil {
-		return "", []string{}, err
-	}
-	// RePlanner
-	replanAgent, err := NewRePlanAgent(ctx)
-	if err != nil {
-		return "", []string{}, err
-	}
-
-	// planexecute.New 在底层组合为：SequentialAgent[Planner, LoopAgent[Executor, Replanner]]
-	// MaxIterations:20 是 LoopAgent 的循环上限，即 Executor+Replanner 最多交替执行 20 轮，
-	// 防止 Replanner 持续拆出新步骤导致无限执行。
-	planExecuteAgent, err := planexecute.New(ctx, &planexecute.Config{
-		Planner:       planAgent,
-		Executor:      executeAgent,
-		Replanner:     replanAgent,
-		MaxIterations: 20,
-	})
-	if err != nil {
-		return "", []string{}, fmt.Errorf("build PlanExecuteAgent Error: %v", err)
+		return "", []string{}, fmt.Errorf("get cached PlanExecuteAgent: %w", err)
 	}
 
 	// adk.NewRunner 将 Agent 包装为事件驱动的运行器。
+	// 注意：Runner 每次新建是正确的（持有 query 查询状态），只有 Agent 本身需要缓存。
 	// r.Query 启动异步执行（内部开 goroutine），返回事件迭代器 iter。
 	// 每当 Agent 有输出（LLM 回复、工具结果、步骤完成等）时，iter.Next() 返回对应事件。
-	r := adk.NewRunner(ctx, adk.RunnerConfig{Agent: planExecuteAgent})
+	r := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
 	iter := r.Query(ctx, query)
 
 	var lastMessage adk.Message

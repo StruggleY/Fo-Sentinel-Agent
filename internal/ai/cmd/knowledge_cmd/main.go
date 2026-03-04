@@ -18,7 +18,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	r, err := knowledge_index_pipeline.BuildKnowledgeIndexing(ctx)
+	r, err := knowledge_index_pipeline.GetKnowledgeIndexing(ctx)
 	if err != nil {
 		panic(err)
 	}

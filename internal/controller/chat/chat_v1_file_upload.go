@@ -79,7 +79,7 @@ func (c *ControllerV1) FileUpload(ctx context.Context, req *v1.FileUploadReq) (r
 // buildIntoIndex 构建文件索引到向量数据库
 func buildIntoIndex(ctx context.Context, path string) error {
 	// 步骤1: 构建知识库索引处理流水线
-	r, err := knowledge_index_pipeline.BuildKnowledgeIndexing(ctx)
+	r, err := knowledge_index_pipeline.GetKnowledgeIndexing(ctx)
 	if err != nil {
 		return fmt.Errorf("build knowledge indexing failed: %w", err)
 	}

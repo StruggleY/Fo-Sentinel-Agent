@@ -2,14 +2,31 @@ package knowledge_index_pipeline
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cloudwego/eino/components/document"
 	"github.com/cloudwego/eino/compose"
 )
 
-// BuildKnowledgeIndexing 构建知识库索引处理流水线
-// 返回一个可执行的图编排流程，输入文档源，输出索引ID列表
-func BuildKnowledgeIndexing(ctx context.Context) (r compose.Runnable[document.Source, []string], err error) {
+var (
+	knowledgeRunner  compose.Runnable[document.Source, []string]
+	knowledgeOnce    sync.Once
+	knowledgeInitErr error
+)
+
+// GetKnowledgeIndexing 返回全局缓存的知识库索引 Agent（懒初始化，线程安全）。
+//
+// 进程生命周期内只执行一次 DAG 编译（g.Compile），所有文件上传请求复用同一个 Runnable。
+// 返回一个可执行的图编排流程，输入文档源，输出索引 ID 列表。
+func GetKnowledgeIndexing(ctx context.Context) (compose.Runnable[document.Source, []string], error) {
+	knowledgeOnce.Do(func() {
+		knowledgeRunner, knowledgeInitErr = buildKnowledgeIndexing(context.Background())
+	})
+	return knowledgeRunner, knowledgeInitErr
+}
+
+// buildKnowledgeIndexing 构建知识库索引处理流水线（内部函数，仅被 sync.Once 调用一次）。
+func buildKnowledgeIndexing(ctx context.Context) (r compose.Runnable[document.Source, []string], err error) {
 	// 定义流水线各节点名称
 	const (
 		FileLoader       = "FileLoader"       // 文件加载器节点

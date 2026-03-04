@@ -2,19 +2,37 @@ package chat_pipeline
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
-// BuildChatAgent 构建 RAG + ReAct 对话 Agent 并编译为可执行 Runnable。
+var (
+	chatRunner  compose.Runnable[*UserMessage, *schema.Message]
+	chatOnce    sync.Once
+	chatInitErr error
+)
+
+// GetChatAgent 返回全局缓存的 Chat Agent（懒初始化，线程安全）。
+//
+// 进程生命周期内只执行一次 DAG 编译（g.Compile 包含拓扑排序、类型校验、执行计划生成），
+// 所有并发请求复用同一个 Runnable 实例（Eino 框架保证 Invoke/Stream 各自创建独立执行上下文）。
 //
 // 数据流（两路并行，fan-in 后驱动 ReAct）：
 //
 //	               ┌─► InputToRag ──► MilvusRetriever ──┐
 //	UserMessage ───┤                                     ├──► ChatTemplate ──► ReactAgent ──► END
 //	               └─► InputToChat ──────────────────────┘
-func BuildChatAgent(ctx context.Context) (r compose.Runnable[*UserMessage, *schema.Message], err error) {
+func GetChatAgent(ctx context.Context) (compose.Runnable[*UserMessage, *schema.Message], error) {
+	chatOnce.Do(func() {
+		chatRunner, chatInitErr = buildChatAgent(context.Background())
+	})
+	return chatRunner, chatInitErr
+}
+
+// buildChatAgent 构建 RAG + ReAct 对话 Agent 并编译为可执行 Runnable（内部函数，仅被 sync.Once 调用一次）。
+func buildChatAgent(ctx context.Context) (r compose.Runnable[*UserMessage, *schema.Message], err error) {
 	// 节点 ID 常量，用于 AddNode / AddEdge 时引用，避免字符串拼写错误
 	const (
 		InputToRag      = "InputToRag"

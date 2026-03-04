@@ -3,12 +3,13 @@ package chat
 import (
 	v1 "Fo-Sentinel-Agent/api/chat/v1"
 	"Fo-Sentinel-Agent/internal/ai/agent/chat_pipeline"
+	"Fo-Sentinel-Agent/internal/ai/cache"
 	"Fo-Sentinel-Agent/utility/log_call_back"
-	"Fo-Sentinel-Agent/utility/mem"
 	"context"
 	"errors"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
@@ -37,15 +38,60 @@ func (c *ControllerV1) ChatStream(ctx context.Context, req *v1.ChatStreamReq) (r
 		return nil, err
 	}
 
+	// 启动心跳
+	// 每 15s 发送一次 SSE 注释行（`: keepalive\n\n`），浏览器忽略但保持 TCP 活跃
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+	defer cancelHeartbeat() // 函数退出时停止心跳 goroutine
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				client.SendHeartbeat()
+			case <-heartbeatCtx.Done():
+				return
+			}
+		}
+	}()
+
+	// 获取对话历史（两级缓存架构 + 长期摘要）
+	// 优先从进程内存读取（热数据），若为空则从 Redis 冷启动恢复
+	memory := cache.GetChatMemory(id)
+	recent := memory.GetRecentMessages()
+	summary := memory.GetLongTermSummary()
+
+	// 记录当前内存中的对话状态
+	g.Log().Debugf(ctx, "[ChatStream] load memory, session_id=%s, recent_len=%d, has_summary=%t",
+		id, len(recent), summary != "")
+
+	if len(recent) == 0 && summary == "" {
+		// 内存为空，尝试从 Redis 恢复（服务重启后的冷启动场景）
+		if r, s, err := cache.GetChatState(ctx, id); err == nil && (len(r) > 0 || s != "") {
+			// 将 Redis 中的历史状态一次性写回进程内存（后续请求可直接从内存读取，无需再查 Redis）
+			memory.SetState(r, s)
+			recent = r
+			summary = s
+
+			g.Log().Infof(ctx, "[ChatStream] restored history from redis, session_id=%s, recent_len=%d, has_summary=%t",
+				id, len(recent), summary != "")
+		} else if err != nil {
+			g.Log().Warningf(ctx, "[ChatStream] failed to load history from redis, session_id=%s, error=%v", id, err)
+		}
+	}
+
+	// 构建历史消息
+	history := cache.BuildHistoryWithSummary(recent, summary)
+
 	// 组装本次推理输入，携带历史消息使模型具备多轮对话上下文感知
 	userMessage := &chat_pipeline.UserMessage{
 		ID:      id,
 		Query:   msg,
-		History: mem.GetSimpleMemory(id).GetMessages(),
+		History: history,
 	}
 
 	// 构建 Chat Agent（RAG + ReAct DAG Pipeline）
-	runner, err := chat_pipeline.BuildChatAgent(ctx)
+	runner, err := chat_pipeline.GetChatAgent(ctx)
 
 	// runner.Stream 以流式模式调用 Agent，返回 StreamReader。
 	// 内部 ReAct 循环仍会完整执行（工具调用、多步推理），
@@ -62,13 +108,25 @@ func (c *ControllerV1) ChatStream(ctx context.Context, req *v1.ChatStreamReq) (r
 	// 不能在 for 循环中逐 chunk 写入记忆，因为模型回复在流式传输过程中是不完整的。
 	var fullResponse strings.Builder
 
-	// defer 保证无论函数以何种方式退出（正常结束、中途报错、客户端断开），
 	// 只要已收到部分或全部回复，就将本轮完整对话写入记忆，维持多轮上下文的连贯性。
 	defer func() {
 		completeResponse := fullResponse.String()
 		if completeResponse != "" {
-			mem.GetSimpleMemory(id).SetMessages(schema.UserMessage(msg))
-			mem.GetSimpleMemory(id).SetMessages(schema.AssistantMessage(completeResponse, nil))
+			memory.SetMessages(schema.UserMessage(msg))
+			memory.SetMessages(schema.AssistantMessage(completeResponse, nil))
+
+			g.Log().Debugf(ctx, "[ChatStream] append round messages, session_id=%s, user_len=%d, assistant_len=%d",
+				id, len(msg), len(completeResponse))
+			// 异步持久化到 Redis（不阻塞主链路）
+			go func() {
+				bgCtx := context.Background()
+				if err := cache.SetRecentState(bgCtx, id, memory.GetRecentMessages()); err != nil {
+					g.Log().Errorf(bgCtx, "failed to persist recent state to redis, session_id=%s, error=%v", id, err)
+				} else {
+					g.Log().Infof(bgCtx, "[ChatStream] persisted recent state to redis, session_id=%s, recent_len=%d, has_summary=%t",
+						id, len(memory.GetRecentMessages()), memory.GetLongTermSummary() != "")
+				}
+			}()
 		}
 	}()
 

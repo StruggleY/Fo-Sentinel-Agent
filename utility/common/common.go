@@ -15,7 +15,7 @@ const (
 var FileDir = "./docs/"
 
 // CollectionFields 是 biz 集合的唯一 Schema 定义（Single Source of Truth）。
-// client.go（建表）和 indexer.go（写入）共同引用此变量，杜绝两处独立维护导致的字段漂移。
+// milvus_client.go（建表）和 indexer.go（写入）共同引用此变量，杜绝两处独立维护导致的字段漂移。
 //
 // 向量类型选择说明：
 //   - 使用 FloatVector(2048) 而非 BinaryVector(65536)：

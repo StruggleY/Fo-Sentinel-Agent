@@ -2,7 +2,7 @@ package main
 
 import (
 	"Fo-Sentinel-Agent/internal/ai/agent/chat_pipeline"
-	"Fo-Sentinel-Agent/utility/mem"
+	"Fo-Sentinel-Agent/internal/ai/cache"
 	"context"
 	"fmt"
 
@@ -12,12 +12,18 @@ import (
 func main() {
 	ctx := context.Background()
 	id := "111"
+
+	mem := cache.GetChatMemory(id)
+	recent := mem.GetRecentMessages()
+	summary := mem.GetLongTermSummary()
+	history := cache.BuildHistoryWithSummary(recent, summary)
+
 	userMessage := &chat_pipeline.UserMessage{
 		ID:      id,
 		Query:   "你好",
-		History: mem.GetSimpleMemory(id).GetMessages(),
+		History: history,
 	}
-	runner, err := chat_pipeline.BuildChatAgent(ctx)
+	runner, err := chat_pipeline.GetChatAgent(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -29,13 +35,19 @@ func main() {
 	answer := out.Content
 	fmt.Println("Q: 你好")
 	fmt.Println("A:", answer)
-	mem.GetSimpleMemory(id).SetMessages(schema.UserMessage("你好"))
-	mem.GetSimpleMemory(id).SetMessages(schema.AssistantMessage(out.Content, nil))
+	cache.GetChatMemory(id).SetMessages(schema.UserMessage("你好"))
+	cache.GetChatMemory(id).SetMessages(schema.AssistantMessage(out.Content, nil))
+
+	// 重新获取一次 history（包含可能新增的长期摘要）
+	recent = mem.GetRecentMessages()
+	summary = mem.GetLongTermSummary()
+	history = cache.BuildHistoryWithSummary(recent, summary)
+
 	// 第二次对话
 	userMessage = &chat_pipeline.UserMessage{
 		ID:      id,
 		Query:   "现在是几点",
-		History: mem.GetSimpleMemory(id).GetMessages(),
+		History: history,
 	}
 	out, err = runner.Invoke(ctx, userMessage)
 	if err != nil {
