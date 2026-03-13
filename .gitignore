@@ -18,3 +18,7 @@ temp.yaml
 bin
 
 manifest/docker/volumes
+
+# 前端
+node_modules/
+dist/
