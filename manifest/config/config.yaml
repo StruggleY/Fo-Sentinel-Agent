@@ -1,11 +1,9 @@
-# https://goframe.org/docs/web/server-config-file-template
 server:
   address: ":8000"
   openapiPath: "/api.json"
   swaggerPath: "/swagger"
   clientMaxBodySize: 52428800  # 50 MB，HTTP Body 硬限制，防止超大文件打爆内存
 
-# https://goframe.org/docs/core/glog-config
 logger:
   level: "all"
   stdout: true
@@ -44,7 +42,33 @@ redis:
     ttl: 720               # 缓存有效期（小时），30 天 = 30*24
     key_prefix: "session"
 
+# MySQL 配置（事件/订阅/报告表）
+database:
+  mysql:
+    dsn: "root:sentinel123@tcp(127.0.0.1:3307)/fo_sentinel?charset=utf8mb4&parseTime=True"
+
+auth:
+  jwt:
+    enabled: false          # 设为 true 启用 API 鉴权
+    secret: "change-me-in-production"
+    expire_hours: 24
+  seed:
+    admin_password: "admin123"  # 首次初始化默认 admin 密码，生产环境务必修改
+
+# 工具配置
+tools:
+  cls_mcp_url: ""                    # 腾讯云 CLS 日志查询 MCP 接口地址，留空则禁用日志查询工具
+  prometheus_url: "http://127.0.0.1:9090"  # Prometheus 服务地址
+
+# 订阅事件调度器
+scheduler:
+  fetch_interval_minutes: 15
+  index_interval_minutes: 20
+  index_batch_size: 10        # 向量索引单批文档数，受 DashScope Embedding API 上限约束（≤10）
+
 # 对话记忆配置（分层记忆架构：短期记忆 + 长期摘要）
 memory:
-  summaryTrigger: 30  # 触发历史对话总结阈值
-  summaryBatchSize: 10  # 每次总结的消息数量
+  summaryTrigger: 30    # 消息数触发阈值（辅助触发器，超过此条数则触发总结）
+  summaryBatchSize: 10  # 消息数触发时每次总结的消息数量
+  tokenTrigger: 3000    # Token 触发阈值（主触发器，超出时触发总结）
+  minRecentMessages: 4  # 总结后最少保留的消息数（保证当前对话连贯性，建议 ≥ 4）

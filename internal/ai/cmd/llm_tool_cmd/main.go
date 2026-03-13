@@ -1,7 +1,8 @@
 package main
 
 import (
-	tools2 "Fo-Sentinel-Agent/internal/ai/tools"
+	toolsobserve "Fo-Sentinel-Agent/internal/ai/tools/observe"
+	toolssystem "Fo-Sentinel-Agent/internal/ai/tools/system"
 	"context"
 	"fmt"
 
@@ -23,8 +24,8 @@ func main() {
 		panic(err)
 	}
 	// 获取工具信息, 用于绑定到 ChatModel
-	toolList, _ := tools2.GetLogMcpTool()
-	toolList = append(toolList, tools2.NewGetCurrentTimeTool())
+	toolList, _ := toolsobserve.GetLogMcpTool(ctx)
+	toolList = append(toolList, toolssystem.NewGetCurrentTimeTool())
 	toolInfos := make([]*schema.ToolInfo, 0)
 	var info *schema.ToolInfo
 	for _, todoTool := range toolList {

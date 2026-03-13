@@ -33,11 +33,13 @@ type FileUploadRes struct {
 	FileSize int64  `json:"fileSize" dc:"文件大小(字节)"`
 }
 
-type AIOpsReq struct {
-	g.Meta `path:"/ai_ops" method:"post" summary:"AI运维"`
+// IntentChatReq Intent 意图驱动多 Agent 对话请求
+type IntentChatReq struct {
+	g.Meta    `path:"/chat/v1/intent_recognition" method:"post" summary:"Intent 意图驱动多 Agent 对话"`
+	Query     string `json:"query" v:"required"`
+	SessionId string `json:"session_id"` // 会话唯一标识，前端生成并持久化，用于跨轮次上下文隔离
 }
 
-type AIOpsRes struct {
-	Result string   `json:"result"`
-	Detail []string `json:"detail"`
+// IntentChatRes Intent 响应（SSE 流式）
+type IntentChatRes struct {
 }

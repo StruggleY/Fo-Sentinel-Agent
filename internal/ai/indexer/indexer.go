@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	embedder2 "Fo-Sentinel-Agent/internal/ai/embedder"
 	"Fo-Sentinel-Agent/utility/client"
@@ -45,10 +46,26 @@ func floatVectorDocumentConverter(_ context.Context, docs []*schema.Document, ve
 	return rows, nil
 }
 
-// NewMilvusIndexer 创建并返回一个 Milvus 向量索引器。
-//   - 负责初始化 Milvus 客户端与 Embedding 组件
+var (
+	globalIndexer     *milvus.Indexer
+	globalIndexerOnce sync.Once
+	globalIndexerErr  error
+)
+
+// GetMilvusIndexer 返回全局单例 Milvus 索引器（懒初始化，线程安全）。
+// milvus.NewIndexer 每次都会执行 HasCollection/DescribeCollection/GetLoadState 等 gRPC 检查，
+// 缓存单例避免每次 IndexDocuments 重复触发这些初始化 round-trip。
+func GetMilvusIndexer(ctx context.Context) (*milvus.Indexer, error) {
+	globalIndexerOnce.Do(func() {
+		globalIndexer, globalIndexerErr = NewMilvusIndexer(ctx)
+	})
+	return globalIndexer, globalIndexerErr
+}
+
+// NewMilvusIndexer 创建并返回一个新的 Milvus 向量索引器（每次调用都做完整初始化检查）。
+// 日常使用请调用 GetMilvusIndexer 获取单例；此函数供首次初始化或测试场景使用。
 //   - 字段定义统一引用 common.CollectionFields（单一事实来源），
-//     与 milvus_client.go 建表时使用的 Schema 完全一致，杜绝字段漂移
+//     与 milvus.go 建表时使用的 Schema 完全一致，杜绝字段漂移
 func NewMilvusIndexer(ctx context.Context) (*milvus.Indexer, error) {
 	cli, err := client.GetMilvusClient(ctx)
 	if err != nil {
@@ -66,9 +83,9 @@ func NewMilvusIndexer(ctx context.Context) (*milvus.Indexer, error) {
 		Embedding:         eb,
 		DocumentConverter: floatVectorDocumentConverter,
 	}
-	indexer, err := milvus.NewIndexer(ctx, config)
+	idx, err := milvus.NewIndexer(ctx, config)
 	if err != nil {
 		return nil, err
 	}
-	return indexer, nil
+	return idx, nil
 }

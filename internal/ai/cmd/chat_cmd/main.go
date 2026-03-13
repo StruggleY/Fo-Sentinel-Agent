@@ -13,7 +13,7 @@ func main() {
 	ctx := context.Background()
 	id := "111"
 
-	mem := cache.GetChatMemory(id)
+	mem := cache.GetSessionMemory(id)
 	recent := mem.GetRecentMessages()
 	summary := mem.GetLongTermSummary()
 	history := cache.BuildHistoryWithSummary(recent, summary)
@@ -35,8 +35,8 @@ func main() {
 	answer := out.Content
 	fmt.Println("Q: 你好")
 	fmt.Println("A:", answer)
-	cache.GetChatMemory(id).SetMessages(schema.UserMessage("你好"))
-	cache.GetChatMemory(id).SetMessages(schema.AssistantMessage(out.Content, nil))
+	cache.GetSessionMemory(id).SetMessages(schema.UserMessage("你好"))
+	cache.GetSessionMemory(id).SetMessages(schema.AssistantMessage(out.Content, nil))
 
 	// 重新获取一次 history（包含可能新增的长期摘要）
 	recent = mem.GetRecentMessages()

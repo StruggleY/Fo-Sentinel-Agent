@@ -277,7 +277,13 @@ func (c *Retriever) Retrieve(ctx context.Context, query string, opts ...einoretr
 }
 
 // parseMilvusResult 将单条 SearchResult 映射为 []*schema.Document。
-// 字段顺序与建表 CollectionFields 一致：id / content / metadata。
+//
+// Milvus Search 结果结构说明：
+//   - result.IDs     — 主键列（VarChar），Milvus 始终单独维护，不出现在 result.Fields 中
+//   - result.Fields  — 非主键输出字段：content（VarChar）、metadata（JSON）
+//   - result.Scores  — 每条结果的余弦相似度，与 IDs 下标一一对应
+//
+// 因此 ID 必须从 result.IDs 无条件读取，不能依赖 Fields 循环触发。
 func parseMilvusResult(result milvuscli.SearchResult) ([]*schema.Document, error) {
 	if result.Err != nil {
 		return nil, fmt.Errorf("milvus search result error: %w", result.Err)
@@ -292,16 +298,21 @@ func parseMilvusResult(result milvuscli.SearchResult) ([]*schema.Document, error
 		docs[i] = &schema.Document{MetaData: make(map[string]any)}
 	}
 
+	// 主键 ID 从 result.IDs 无条件读取。
+	// 不能放在 result.Fields 循环内：主键不在 Fields 列表中，
+	// 若依赖 case "id": 触发，doc.ID 将永远是空字符串。
+	for i, doc := range docs {
+		id, err := result.IDs.GetAsString(i)
+		if err != nil {
+			return nil, fmt.Errorf("get id at %d: %w", i, err)
+		}
+		doc.ID = id
+	}
+
+	// 非主键字段：content（VarChar）和 metadata（JSON）
 	for _, field := range result.Fields {
 		for i, doc := range docs {
 			switch field.Name() {
-			case "id":
-				// 主键列由 result.IDs 单独维护，不在 Fields 里
-				id, err := result.IDs.GetAsString(i)
-				if err != nil {
-					return nil, fmt.Errorf("get id at %d: %w", i, err)
-				}
-				doc.ID = id
 			case "content":
 				content, err := field.GetAsString(i)
 				if err != nil {

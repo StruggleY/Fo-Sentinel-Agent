@@ -1,9 +1,8 @@
 package chat_pipeline
 
-import "github.com/cloudwego/eino/schema"
+import "Fo-Sentinel-Agent/internal/ai/agent/base"
 
-type UserMessage struct {
-	ID      string            `json:"id"`
-	Query   string            `json:"query"`
-	History []*schema.Message `json:"history"`
-}
+// UserMessage 复用 base.UserMessage（type alias，与 base.UserMessage 是同一类型）。
+// chat_pipeline 保留自己的 orchestration/lambda 逻辑（含 Token 感知压缩），
+// 但输入类型统一为 base.UserMessage，与其他 Agent 对齐。
+type UserMessage = base.UserMessage

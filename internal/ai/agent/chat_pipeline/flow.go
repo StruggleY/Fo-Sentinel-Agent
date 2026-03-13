@@ -1,22 +1,28 @@
 package chat_pipeline
 
 import (
-	"Fo-Sentinel-Agent/internal/ai/tools"
 	"context"
+
+	toolsevent "Fo-Sentinel-Agent/internal/ai/tools/event"
+	toolsobserve "Fo-Sentinel-Agent/internal/ai/tools/observe"
+	toolsreport "Fo-Sentinel-Agent/internal/ai/tools/report"
+	toolssystem "Fo-Sentinel-Agent/internal/ai/tools/system"
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // newReactAgentLambda 构建 ReAct Agent 并包装为 DAG 可用的 Lambda 节点。
 //
 // ReAct 执行模型（Reasoning + Acting）：
-//  每一步 LLM 会输出结构化的 Tool Call（而非直接回答），框架捕获后执行对应工具，
-//  将工具返回结果作为 Observation 追加进 Messages，再交还给 LLM 继续推理，循环往复：
 //
-//   Prompt → [Thought] → Tool Call → Observation → [Thought] → ... → Final Answer
+//	每一步 LLM 会输出结构化的 Tool Call（而非直接回答），框架捕获后执行对应工具，
+//	将工具返回结果作为 Observation 追加进 Messages，再交还给 LLM 继续推理，循环往复：
 //
-//  整个过程对用户透明，用户只看到最终回答。
+//	 Prompt → [Thought] → Tool Call → Observation → [Thought] → ... → Final Answer
+//
+//	整个过程对用户透明，用户只看到最终回答。
 func newReactAgentLambda(ctx context.Context) (lba *compose.Lambda, err error) {
 	config := &react.AgentConfig{
 		// MaxStep 限制 Thought→Action 的最大循环轮次，防止 LLM 陷入无限工具调用死循环。
@@ -44,24 +50,31 @@ func newReactAgentLambda(ctx context.Context) (lba *compose.Lambda, err error) {
 
 	// 腾讯云 CLS 日志查询（MCP 协议）：通过 SSE 连接腾讯云 MCP Server，
 	// 动态获取 SearchLog 等日志工具，供 LLM 查询生产日志。
-	mcpTool, err := tools.GetLogMcpTool()
-	if err != nil {
-		return nil, err
+	// MCP 服务不可用时（未配置或连接失败）优雅跳过，不影响其他工具的注册。
+	if mcpTool, err := toolsobserve.GetLogMcpTool(ctx); err != nil {
+		g.Log().Warningf(ctx, "[ChatPipeline] MCP 日志工具加载失败，跳过: %v", err)
+	} else {
+		config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, mcpTool...)
 	}
-	config.ToolsConfig.Tools = mcpTool
 
 	// Prometheus 告警查询：调用本地 Prometheus HTTP API，获取当前所有 firing 告警列表
-	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewPrometheusAlertsQueryTool())
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsobserve.NewQueryMetricsAlertsTool())
 
-	// MySQL CRUD：执行任意 SQL，查询前有终端二次确认交互（防止 LLM 误操作数据库）
-	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewMysqlCrudTool())
+	// 数据库只读查询：执行任意 SELECT 语句，覆盖专用工具未提供的聚合/跨表查询场景
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolssystem.NewQueryDatabaseTool())
 
 	// 当前时间：返回秒/毫秒/微秒时间戳，解决 LLM 不感知实时时间的问题。
 	// 尤其用于 SearchLog 工具的 From/To 时间范围计算（LLM 先调此工具获取 T，再计算时间窗口）
-	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewGetCurrentTimeTool())
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolssystem.NewGetCurrentTimeTool())
 
 	// 内部文档检索：从本地知识库（向量索引）检索与告警名称匹配的处理方案文档
-	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewQueryInternalDocsTool())
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolssystem.NewQueryInternalDocsTool())
+
+	// 事件/订阅/报告查询
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsevent.NewQueryEventsTool())
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsevent.NewQuerySubscriptionsTool())
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsreport.NewQueryReportsTool())
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsevent.NewSearchSimilarEventsTool())
 
 	// react.NewAgent 根据上述配置实例化 ReAct Agent，
 	// 内部维护消息历史，每轮将 Observation 追加后重新调用 LLM。

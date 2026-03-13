@@ -84,6 +84,25 @@ services:
       timeout: 5s
       retries: 3
 
+  mysql:
+    container_name: sentinel-mysql
+    image: mysql:8.0
+    ports:
+      - "3307:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=sentinel123
+      - MYSQL_DATABASE=fo_sentinel
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 networks:
   default:
     name: milvus
+
+volumes:
+  mysql_data:

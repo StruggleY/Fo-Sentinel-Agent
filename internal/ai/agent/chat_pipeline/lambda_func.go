@@ -1,10 +1,10 @@
 package chat_pipeline
 
 import (
+	"Fo-Sentinel-Agent/internal/ai/token"
 	"context"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/cloudwego/eino/schema"
 )
@@ -35,7 +35,7 @@ func newInputToChatLambda(ctx context.Context, input *UserMessage, opts ...any) 
 	// Token 感知窗口：当历史超过阈值时，将旧对话压缩为摘要（保留最近 2 条维持当前对话连贯性）
 	// 阈值 3000：systemPrompt(~500) + RAG文档(~1000) + 当前提问(~500) + 历史(3000) = 约 5000 tokens，
 	// 对 DeepSeek 128K 上下文完全安全，同时给工具调用结果预留足够空间
-	if estimateHistoryTokens(history) > 3000 && len(history) >= 4 {
+	if token.EstimateMessages(history) > 3000 && len(history) >= 4 {
 		// 摘要压缩：将最旧的 N-2 条消息压缩为一段简短摘要，保留最新 2 条（当前轮上下文）
 		summarized, err := summarizeOldHistory(ctx, history[:len(history)-2])
 		if err == nil && summarized != "" {
@@ -51,16 +51,6 @@ func newInputToChatLambda(ctx context.Context, input *UserMessage, opts ...any) 
 		"history": history,
 		"date":    time.Now().Format("2006-01-02 15:04:05"),
 	}, nil
-}
-
-// estimateHistoryTokens 粗略估算历史消息的 Token 总量（用于判断是否需要摘要压缩）。
-// 估算规则：1 字符 ≈ 1 token（保守估算），role 标记每条 +10 tokens
-func estimateHistoryTokens(msgs []*schema.Message) int {
-	total := 0
-	for _, msg := range msgs {
-		total += utf8.RuneCountInString(msg.Content) + 10
-	}
-	return total
 }
 
 // summarizeOldHistory 调用 LLM 将旧对话压缩为一段不超过 200 字的摘要。
