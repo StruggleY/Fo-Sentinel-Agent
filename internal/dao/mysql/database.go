@@ -1,0 +1,74 @@
+package mysql
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+)
+
+var (
+	globalDB *gorm.DB
+	dbOnce   sync.Once
+	initErr  error
+)
+
+// Init 初始化 MySQL 连接并执行 GORM 迁移，main 启动时调用；dsn 未配置时跳过
+func Init(ctx context.Context) error {
+	dbOnce.Do(func() {
+		dsn, err := g.Cfg().Get(ctx, "database.mysql.dsn")
+		if err != nil || dsn.String() == "" {
+			return // 未配置则跳过，不阻塞启动
+		}
+		rawDSN := dsn.String()
+		// 若 DSN 未指定 loc，追加 loc=Local 确保 Go 与 MySQL 时区一致（autoCreateTime 使用本地时间）
+		if !strings.Contains(rawDSN, "loc=") {
+			if strings.Contains(rawDSN, "?") {
+				rawDSN += "&loc=Local"
+			} else {
+				rawDSN += "?loc=Local"
+			}
+		}
+		db, err := gorm.Open(mysql.Open(rawDSN), &gorm.Config{})
+		if err != nil {
+			initErr = fmt.Errorf("open mysql: %w", err)
+			return
+		}
+		if err = db.WithContext(ctx).AutoMigrate(&Event{}, &Subscription{}, &Report{}, &User{}, &Setting{}, &QueryTermMapping{}, &TraceRun{}, &TraceNode{}, &KnowledgeBase{}, &KnowledgeDocument{}, &KnowledgeChunk{}, &MessageFeedback{}); err != nil {
+			initErr = fmt.Errorf("auto migrate: %w", err)
+			return
+		}
+		// 连接池：MaxOpen 限制并发数防打爆 server，MaxIdle 复用减少握手开销，MaxLifetime 防服务端超时强断
+		if sqlDB, e := db.DB(); e == nil {
+			sqlDB.SetMaxOpenConns(100)                 // 20 → 100（支持更高并发）
+			sqlDB.SetMaxIdleConns(20)                  // 5 → 20（减少连接建立开销）
+			sqlDB.SetConnMaxLifetime(time.Hour)        // 连接最大存活时间
+			sqlDB.SetConnMaxIdleTime(10 * time.Minute) // 空闲连接10分钟后回收
+		}
+		globalDB = db
+	})
+	return initErr
+}
+
+// DB 返回全局 DB 实例，Init 成功后使用
+func DB(ctx context.Context) (*gorm.DB, error) {
+	if initErr != nil {
+		return nil, initErr
+	}
+	return globalDB.WithContext(ctx), nil
+}
+
+// RegisterPlugin 向全局 DB 实例注册 GORM 插件。
+// 必须在 Init() 成功后调用；globalDB 为 nil 时静默忽略。
+// 用于注册外部插件（如 trace.NewGORMPlugin()），避免 dao/mysql 与 trace 包之间循环依赖。
+func RegisterPlugin(plugin gorm.Plugin) error {
+	if globalDB == nil {
+		return nil
+	}
+	return globalDB.Use(plugin)
+}

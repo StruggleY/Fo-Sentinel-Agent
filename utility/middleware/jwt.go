@@ -3,7 +3,7 @@ package middleware
 import (
 	"strings"
 
-	"Fo-Sentinel-Agent/internal/auth"
+	"Fo-Sentinel-Agent/utility/auth"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"

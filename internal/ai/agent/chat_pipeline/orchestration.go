@@ -75,7 +75,7 @@ func buildChatAgent(ctx context.Context) (r compose.Runnable[*UserMessage, *sche
 	//   2. Action   ── LLM 决定调用哪个工具及参数（Tool Call）
 	//   3. Observation ── 工具执行后将结果追加到 Messages，LLM 继续下一轮推理
 	//   4. 循环直到 LLM 输出 Final Answer（不再调用工具），最多 MaxStep=25 轮
-	// 当前注册的工具集：腾讯云日志查询(MCP)、Prometheus 告警、MySQL CRUD、当前时间、内部文档检索
+	// 当前注册的工具集：MySQL CRUD、当前时间、内部文档检索、事件/订阅/报告查询
 	// compose.AnyLambda 将 ins.Generate（同步）和 ins.Stream（流式）同时封装，
 	// 框架根据调用方使用 Invoke 还是 Stream 自动选择对应实现。
 	reactAgentKeyOfLambda, err := newReactAgentLambda(ctx)

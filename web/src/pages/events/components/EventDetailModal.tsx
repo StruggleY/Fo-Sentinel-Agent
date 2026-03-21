@@ -96,7 +96,7 @@ export default function EventDetailModal({ event, onClose, onUpdate }: EventDeta
                 <Shield className="w-3.5 h-3.5" />
                 数据来源
               </div>
-              <p className="text-sm text-gray-700">{event.source}</p>
+              <p className="text-sm text-gray-700">{event.source === 'web_search' ? '联网搜索' : event.source}</p>
             </div>
             {event.cvss_score != null && event.cvss_score > 0 && (
               <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">

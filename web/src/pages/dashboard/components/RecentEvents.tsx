@@ -47,35 +47,35 @@ export default function RecentEvents() {
   }
 
   return (
-    <div className="table-container">
-      <table className="table">
+    <div className="overflow-x-auto h-full">
+      <table className="w-full text-sm h-full">
         <thead>
-          <tr>
-            <th>事件</th>
-            <th>级别</th>
-            <th>来源</th>
-            <th>时间</th>
+          <tr className="border-y border-slate-100 bg-slate-50">
+            <th className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">事件</th>
+            <th className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">级别</th>
+            <th className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">来源</th>
+            <th className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">时间</th>
           </tr>
         </thead>
         <tbody>
           {events.map((event) => {
             const severity = severityConfig[event.severity] || severityConfig.info
             return (
-              <tr key={event.id} className="cursor-pointer group">
-                <td className="max-w-0 w-full">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate block">{event.title}</span>
-                    <ExternalLink className="w-3.5 h-3.5 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+              <tr key={event.id} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer group transition-colors last:border-b-0">
+                <td className="px-5 py-3 text-slate-700 min-w-0 max-w-0 w-full">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="truncate text-slate-800 text-xs font-medium">{event.title}</span>
+                    <ExternalLink className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                   </div>
                 </td>
-                <td className="whitespace-nowrap">
+                <td className="px-5 py-3 whitespace-nowrap">
                   <span className={severity.class}>{severity.label}</span>
                 </td>
-                <td className="whitespace-nowrap">
-                  <span className="tag tag-default">{event.source || '-'}</span>
+                <td className="px-5 py-3 whitespace-nowrap">
+                  <span className="inline-flex items-center h-5 px-2 text-xs font-medium rounded bg-slate-100 text-slate-600">{event.source || '-'}</span>
                 </td>
-                <td className="text-gray-500 whitespace-nowrap">
-                  {formatDate(event.created_at, 'YYYY-MM-DD HH:mm')}
+                <td className="px-5 py-3 whitespace-nowrap text-xs text-slate-400 tabular-nums">
+                  {formatDate(event.created_at, 'MM-DD HH:mm')}
                 </td>
               </tr>
             )

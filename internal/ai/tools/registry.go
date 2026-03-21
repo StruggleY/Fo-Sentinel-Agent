@@ -1,4 +1,4 @@
-// Package tools 全局工具注册表：消除 pipeline 与 skills 之间的工具实例重复。
+// Package tools 全局工具注册表：供各 Agent pipeline 共享工具实例。
 //
 // 设计原则：
 //   - 工具是无状态的（只封装数据库/API 调用逻辑），可安全地在多个 Agent 执行器之间共享
@@ -8,7 +8,6 @@
 // 使用方式：
 //  1. 在 init.go 的 init() 中调用 Register 完成所有工具的一次性注册
 //  2. Agent pipeline 通过 GetMany([]string{...}) 按名称获取所需工具子集
-//  3. Skills 执行器通过 GetMany(skill.Tools) 获取技能声明的工具列表
 package tools
 
 import (
@@ -57,7 +56,7 @@ func GetMany(names []string) []tool.BaseTool {
 	return result
 }
 
-// All 返回所有已注册工具的快照（调试 / Skills 面板展示用）。
+// All 返回所有已注册工具的快照（调试用）。
 // 返回副本而非原始 map，防止调用方意外修改注册表。
 func All() map[string]tool.BaseTool {
 	mu.RLock()

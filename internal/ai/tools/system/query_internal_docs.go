@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // QueryInternalDocsInput 内部文档检索参数
@@ -22,8 +22,9 @@ func NewQueryInternalDocsTool() tool.InvokableTool {
 		"query_internal_docs",
 		"Use this tool to search internal documentation and knowledge base for relevant information. It performs RAG (Retrieval-Augmented Generation) to find similar documents and extract processing steps. This is useful when you need to understand internal procedures, best practices, or step-by-step guides stored in the company's documentation.",
 		func(ctx context.Context, input *QueryInternalDocsInput, opts ...tool.Option) (output string, err error) {
-			// GetRetriever 使用单例，第一次调用时初始化连接，后续直接复用，无重复建连开销。
-			rr, err := retriever.GetRetriever(ctx)
+			g.Log().Infof(ctx, "[Tool] query_internal_docs 开始 | query=%q", input.Query)
+			// GetDocumentsRetriever 只检索 documents 分区，避免混入安全事件内容。
+			rr, err := retriever.GetDocumentsRetriever(ctx)
 			if err != nil {
 				return "", fmt.Errorf("init retriever: %w", err)
 			}
@@ -31,11 +32,14 @@ func NewQueryInternalDocsTool() tool.InvokableTool {
 			if err != nil {
 				return "", fmt.Errorf("retrieve docs: %w", err)
 			}
+			// 过滤掉已禁用文档的分块
+			resp = retriever.FilterDisabledDocs(ctx, resp)
+			g.Log().Infof(ctx, "[Tool] query_internal_docs 完成 | 返回=%d 条", len(resp))
 			respBytes, _ := json.Marshal(resp)
 			return string(respBytes), nil
 		})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return t
 }

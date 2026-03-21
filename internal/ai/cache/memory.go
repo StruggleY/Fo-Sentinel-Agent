@@ -22,6 +22,7 @@ package cache
 import (
 	"Fo-Sentinel-Agent/internal/ai/agent/summary_pipeline"
 	"Fo-Sentinel-Agent/internal/ai/token"
+	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -158,6 +159,11 @@ func (c *SessionMemory) SetMessages(msg *schema.Message) {
 //   - 每次压缩的条数由 calcSummarizeCount 决定：token 超限时动态计算，条数超限时取固定值
 //   - 新摘要覆盖旧摘要（Summary Agent 的 Prompt 会将上一轮摘要纳入输入，实现滚动压缩）
 //
+// Trace 设计：
+//   - 此方法在独立 goroutine 中运行，无 HTTP 请求上下文，无法挂载到已有 TraceRun。
+//   - 通过 StartRun 创建独立链路（trace_name="memory.summarize"），记录 LLM 调用和 Redis 写入，
+//     便于在 Traces 页面单独分析摘要任务的耗时和 Token 消耗。
+//
 // 锁操作说明：
 //   - 提取消息副本后立即释放锁，避免持锁期间进行网络 I/O（调用 LLM）
 //   - 写回结果时重新加锁，通过 defer 确保解锁
@@ -173,18 +179,25 @@ func (c *SessionMemory) summarizeOldMessages() {
 	summarizeCount := c.calcSummarizeCount()
 
 	// 提取待总结消息的副本后立即释放锁，避免持锁调用 LLM（网络 I/O）
-	// 总结旧的消息
 	messagesToSummarize := make([]*schema.Message, summarizeCount)
 	copy(messagesToSummarize, c.RecentMessages[:summarizeCount])
 	sessionID := c.ID
 	c.mu.Unlock()
 
+	// 为独立的后台摘要任务创建独立链路，便于在 Traces 页面单独分析摘要 Agent 耗时
 	ctx := context.Background()
+	var runErr error
+	if aitrace.IsEnabled() {
+		ctx = aitrace.StartRun(ctx, "memory.summarize", "background",
+			sessionID, "", map[string]any{"session_id": sessionID, "summarize_count": summarizeCount})
+		defer func() { aitrace.FinishRun(ctx, runErr) }()
+	}
 
 	// 步骤 1：获取摘要 Agent（全局单例，懒初始化）
 	summaryAgent, err := summary_pipeline.GetSummaryAgent(ctx)
 	if err != nil {
-		g.Log().Errorf(ctx, "[SummaryAgent] failed to get summary agent for session %s: %v", sessionID, err)
+		runErr = err
+		g.Log().Errorf(ctx, "[SummaryAgent] 获取摘要 Agent 失败 | session=%s | err=%v", sessionID, err)
 		return
 	}
 
@@ -195,7 +208,8 @@ func (c *SessionMemory) summarizeOldMessages() {
 	}
 	output, err := summaryAgent.Invoke(ctx, input)
 	if err != nil {
-		g.Log().Errorf(ctx, "[SummaryAgent] failed to generate summary for session %s: %v", sessionID, err)
+		runErr = err
+		g.Log().Errorf(ctx, "[SummaryAgent] 摘要生成失败 | session=%s | err=%v", sessionID, err)
 		return
 	}
 
@@ -214,18 +228,18 @@ func (c *SessionMemory) summarizeOldMessages() {
 	copy(currentRecent, c.RecentMessages)
 	currentSummary := c.LongTermSummary
 
-	g.Log().Infof(ctx, "[SummaryAgent] summary completed for session %s, summary length: %d chars, remaining messages: %d",
+	g.Log().Infof(ctx, "[SummaryAgent] 摘要生成完成 | session=%s | summary_len=%d | remaining=%d",
 		sessionID, len(output.Summary), len(c.RecentMessages))
-	g.Log().Debugf(ctx, "[SummaryAgent] summary content for session %s:\n%s", sessionID, output.Summary)
+	g.Log().Debugf(ctx, "[SummaryAgent] 摘要内容预览 | session=%s\n%s", sessionID, output.Summary)
 
 	// 步骤 4：异步保存最新状态到 Redis（RecentMessages + LongTermSummary）
 	go func(recent []*schema.Message, summary string, sid string) {
 		bgCtx := context.Background()
 		if err := SaveSession(bgCtx, sid, recent, summary); err != nil {
-			g.Log().Errorf(bgCtx, "[SummaryAgent] failed to save summary state to redis, session_id=%s, error=%v", sid, err)
+			g.Log().Errorf(bgCtx, "[SummaryAgent] 摘要状态持久化失败 | session=%s | err=%v", sid, err)
 			return
 		}
-		g.Log().Infof(bgCtx, "[SummaryAgent] saved summary state to redis, session_id=%s, recent_len=%d, has_summary=%t",
+		g.Log().Infof(bgCtx, "[SummaryAgent] 摘要状态持久化成功 | session=%s | recent_len=%d | has_summary=%t",
 			sid, len(recent), summary != "")
 	}(currentRecent, currentSummary, sessionID)
 }
@@ -275,11 +289,11 @@ func loadConfig(ctx context.Context) {
 		minRecentMessages = g.Cfg().MustGet(ctx, "memory.minRecentMessages").Int()
 
 		if summaryTrigger <= 0 {
-			g.Log().Warningf(ctx, "[MemoryCache] invalid summaryTrigger(%d), must be > 0, fallback to 30", summaryTrigger)
+			g.Log().Warningf(ctx, "[MemoryCache] summaryTrigger 配置无效，使用默认值 30 | got=%d", summaryTrigger)
 			summaryTrigger = 30
 		}
 		if summaryBatchSize <= 0 {
-			g.Log().Warningf(ctx, "[MemoryCache] invalid summaryBatchSize(%d), must be > 0, fallback to 10", summaryBatchSize)
+			g.Log().Warningf(ctx, "[MemoryCache] summaryBatchSize 配置无效，使用默认值 10 | got=%d", summaryBatchSize)
 			summaryBatchSize = 10
 		}
 		if tokenTrigger <= 0 {
@@ -291,18 +305,18 @@ func loadConfig(ctx context.Context) {
 
 		// summaryBatchSize 须小于 summaryTrigger，否则每次总结后立即再次触发
 		if summaryBatchSize >= summaryTrigger {
-			g.Log().Warningf(ctx, "[MemoryCache] summaryBatchSize(%d) >= summaryTrigger(%d), adjusting to %d",
+			g.Log().Warningf(ctx, "[MemoryCache] summaryBatchSize 超过 summaryTrigger，自动调整 | batchSize=%d | trigger=%d | adjusted=%d",
 				summaryBatchSize, summaryTrigger, summaryTrigger/3)
 			summaryBatchSize = summaryTrigger / 3
 		}
 		// minRecentMessages 须小于 summaryTrigger，否则永远无法触发总结
 		if minRecentMessages >= summaryTrigger {
-			g.Log().Warningf(ctx, "[MemoryCache] minRecentMessages(%d) >= summaryTrigger(%d), resetting to 4",
+			g.Log().Warningf(ctx, "[MemoryCache] minRecentMessages 超过 summaryTrigger，重置为 4 | minRecent=%d | trigger=%d",
 				minRecentMessages, summaryTrigger)
 			minRecentMessages = 4
 		}
 
-		g.Log().Infof(ctx, "[MemoryCache] config: summaryTrigger=%d, summaryBatchSize=%d, tokenTrigger=%d, minRecentMessages=%d",
+		g.Log().Infof(ctx, "[MemoryCache] 初始化完成 | summaryTrigger=%d | summaryBatchSize=%d | tokenTrigger=%d | minRecentMessages=%d",
 			summaryTrigger, summaryBatchSize, tokenTrigger, minRecentMessages)
 	})
 }

@@ -5,7 +5,7 @@ package reportsvc
 import (
 	"context"
 
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 
 	"github.com/google/uuid"
 )

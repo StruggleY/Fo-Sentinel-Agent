@@ -13,9 +13,8 @@ import (
 	"time"
 
 	"Fo-Sentinel-Agent/internal/ai/indexer"
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 
-	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/google/uuid"
 	"github.com/mmcdole/gofeed"
@@ -266,6 +265,14 @@ func fetchGitHubAdvisories(ctx context.Context, owner, repo, source string) ([]R
 // cveRe 匹配 CVE 编号，格式：CVE-年份-序号（序号至少 4 位）
 var cveRe = regexp.MustCompile(`CVE-\d{4}-\d{4,}`)
 
+// severity 推断正则：使用词边界（\b）避免子串误匹配（如 high→highlight、low→below）。
+// 中文关键词不需要 \b（CJK 字符在 Go RE2 中天然不属于 \w）。
+var (
+	reCritical = regexp.MustCompile(`\bcritical\b|严重`)
+	reHigh     = regexp.MustCompile(`\bhigh\b|高危`)
+	reLow      = regexp.MustCompile(`\blow\b|低危`)
+)
+
 // Extract 将 RawItem 批量转换为 Event，执行严重程度推断、风险评分映射、CVE 提取。
 // 过滤掉 Title 为空的无效条目（无法作为有效事件入库）。
 // severity 优先级：RawItem.Severity（数据源明确指定，如 Advisory）> 关键词推断（RSS、Release 等无结构化严重度的来源）。
@@ -335,21 +342,20 @@ func SeverityToRiskScore(severity string) float64 {
 }
 
 // inferSeverity 基于关键词推断严重程度，按优先级从高到低匹配，支持中英文。
-// 匹配范围：标题 + 内容拼接后统一转小写，避免大小写遗漏。
+// 匹配范围：标题 + 内容拼接后统一转小写。
+// 使用正则词边界（\b）防止子串误匹配（如 high→highlight、low→below/allow）。
 func inferSeverity(title, content string) string {
 	s := strings.ToLower(title + " " + content)
-	// critical 优先级最高，先行匹配
-	if strings.Contains(s, "critical") || strings.Contains(s, "严重") {
+	switch {
+	case reCritical.MatchString(s):
 		return "critical"
-	}
-	if strings.Contains(s, "high") || strings.Contains(s, "高危") {
+	case reHigh.MatchString(s):
 		return "high"
-	}
-	if strings.Contains(s, "low") || strings.Contains(s, "低") {
+	case reLow.MatchString(s):
 		return "low"
+	default:
+		return "medium"
 	}
-	// 未命中任何关键词时默认 medium，覆盖大多数模糊描述场景
-	return "medium"
 }
 
 // extractCVEID 从文本中提取首个 CVE 编号。
@@ -369,40 +375,19 @@ func extractCVEID(title, content string) string {
 // ==================== 去重入库层（Dedup） ====================
 
 // DedupAndInsert 对事件列表去重后批量插入 MySQL，返回实际插入的事件列表（含完整内存数据）。
-// 去重策略：按 dedup_key 列查询是否已存在（单字段索引查询，性能优于多字段）。
-// 单条失败不阻断其余条目（continue 跳过），保证批量入库的容错性。
+// 委托 dao 层执行，保持 pipeline 包的公共接口稳定。
 func DedupAndInsert(ctx context.Context, events []dao.Event) ([]dao.Event, error) {
-	db, err := dao.DB(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var inserted []dao.Event
-	for _, e := range events {
-		var count int64
-		// 按 dedup_key 单字段去重，利用索引快速判断
-		if err = db.Model(&dao.Event{}).Where("dedup_key = ?", e.DedupKey).Count(&count).Error; err != nil {
-			continue // 查询失败则跳过该条，不中断整批
-		}
-		if count > 0 {
-			continue // 相同去重键的事件已存在，跳过
-		}
-		// Metadata 在 Extract 阶段已设置 link 字段，此处无需再修改
-		if err = db.Create(&e).Error; err != nil {
-			continue
-		}
-		inserted = append(inserted, e)
-	}
-	return inserted, nil
+	return dao.DedupAndInsertEvents(ctx, events)
 }
 
-// dedupKey 生成事件去重键：对 title|source|content(前500字) 取 SHA256，返回十六进制前 32 位。
-// content 只取前 500 字符参与哈希：平衡准确性与计算性能。
+// dedupKey 生成事件去重键：对 title|source|content(前500字符) 取 SHA256，返回十六进制前 32 位。
+// content 按 rune 边界截取前 500 字符，避免在 UTF-8 多字节字符中间截断产生无效编码。
 // 取前 32 位（128 bit）：存储友好，碰撞概率极低（2^-128）。
 func dedupKey(e dao.Event) string {
 	h := sha256.New()
 	content := e.Content
-	if len(content) > 500 {
-		content = content[:500]
+	if runes := []rune(content); len(runes) > 500 {
+		content = string(runes[:500])
 	}
 	// 用 | 分隔字段，防止 "ab"+"c" 与 "a"+"bc" 产生相同哈希
 	h.Write([]byte(e.Title + "|" + e.Source + "|" + strings.TrimSpace(content)))
@@ -411,9 +396,9 @@ func dedupKey(e dao.Event) string {
 
 // ==================== 向量索引层（Indexer） ====================
 
-// IndexDocuments 将内存中的事件列表向量化并写入 Milvus，按配置的批次大小分批调用。
+// IndexDocuments 将内存中的事件列表向量化并写入 Milvus，按配置的批次大小分批执行。
 // 接受 DedupAndInsert 返回的已插入事件（含完整 Content），无需再查询 MySQL。
-// 单批失败不中断其余批次，所有批次完成后统一更新 indexed_at。
+// 单批失败不中断其余批次；仅对成功写入 Milvus 的记录更新 indexed_at，保证标记准确。
 func IndexDocuments(ctx context.Context, events []dao.Event) error {
 	if len(events) == 0 {
 		return nil
@@ -424,62 +409,21 @@ func IndexDocuments(ctx context.Context, events []dao.Event) error {
 		batchSize = v.Int()
 	}
 
-	// GetMilvusIndexer 返回单例，避免每次调用重复执行 gRPC 初始化检查
-	idx, err := indexer.GetMilvusIndexer(ctx)
+	// 委托 indexer 层执行文档构建 + 分批写入 Milvus
+	ids, err := indexer.StoreEvents(ctx, events, batchSize)
 	if err != nil {
-		return fmt.Errorf("初始化 Milvus 索引器失败: %w", err)
+		// GetIndexer 初始化失败，无法继续
+		return err
 	}
 
-	// 构建所有文档
-	docs := make([]*schema.Document, 0, len(events))
-	for _, e := range events {
-		text := e.Title
-		if e.Content != "" {
-			text += "\n" + e.Content
+	if len(ids) > 0 {
+		// 仅标记实际写入成功的记录，截断到秒与 DATETIME 列精度一致
+		now := time.Now().Truncate(time.Second)
+		if markErr := dao.MarkEventsIndexed(ctx, ids, now); markErr != nil {
+			g.Log().Warningf(ctx, "[pipeline] 更新 indexed_at 失败: %v", markErr)
 		}
-		// DashScope text-embedding-v4 最大 8192 tokens，截断防止嵌入接口报错
-		if len(text) > 8192 {
-			text = text[:8192]
-		}
-		meta := map[string]any{
-			"event_id":   e.ID,
-			"source":     e.Source,
-			"event_type": e.EventType,
-			"severity":   e.Severity,
-			"created_at": e.CreatedAt.Format("2006-01-02"),
-		}
-		if e.CVEID != "" {
-			meta["cve_id"] = e.CVEID
-		}
-		docs = append(docs, &schema.Document{ID: e.ID, Content: text, MetaData: meta})
-	}
-
-	// 分批调用：Store 内部无分批，单次全量调用易超 Embedding API 限制
-	var totalIDs []string
-	for i := 0; i < len(docs); i += batchSize {
-		end := i + batchSize
-		if end > len(docs) {
-			end = len(docs)
-		}
-		batchIDs, storeErr := idx.Store(ctx, docs[i:end])
-		if storeErr != nil {
-			// 单批失败记录警告，继续处理剩余批次
-			g.Log().Warningf(ctx, "[pipeline] 第 %d 批向量索引失败（%d~%d）: %v", i/batchSize+1, i, end, storeErr)
-			continue
-		}
-		totalIDs = append(totalIDs, batchIDs...)
-	}
-
-	// 批量更新 indexed_at（仅对成功写入 Milvus 的记录）
-	if len(totalIDs) > 0 {
-		db, dbErr := dao.DB(ctx)
-		if dbErr == nil {
-			now := time.Now().Truncate(time.Second) // 截断到秒，与 DATETIME 列精度一致
-			for _, e := range events {
-				_ = db.Model(&dao.Event{}).Where("id = ?", e.ID).Update("indexed_at", now).Error
-			}
-		}
-		g.Log().Infof(ctx, "[pipeline] 向量索引完成，共 %d 条（分 %d 批）", len(totalIDs), (len(docs)+batchSize-1)/batchSize)
+		g.Log().Infof(ctx, "[pipeline] 向量索引完成，成功 %d/%d 条（分 %d 批）",
+			len(ids), len(events), (len(events)+batchSize-1)/batchSize)
 	}
 	return nil
 }
@@ -492,8 +436,10 @@ func IndexDocumentsAsync(ctx context.Context, events []dao.Event) {
 		return
 	}
 	go func() {
-		if err := IndexDocuments(context.Background(), events); err != nil {
-			g.Log().Warningf(ctx, "[pipeline] 异步向量索引失败: %v", err)
+		// 使用独立 context，避免父 ctx（HTTP 请求）取消后任务中断或日志丢失追踪信息
+		bgCtx := context.Background()
+		if err := IndexDocuments(bgCtx, events); err != nil {
+			g.Log().Warningf(bgCtx, "[pipeline] 异步向量索引失败: %v", err)
 		}
 	}()
 }

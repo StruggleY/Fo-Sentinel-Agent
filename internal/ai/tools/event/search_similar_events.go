@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"Fo-Sentinel-Agent/internal/ai/retriever"
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // SearchSimilarEventsInput 相似事件语义搜索参数。
@@ -80,8 +80,8 @@ func NewSearchSimilarEventsTool() tool.InvokableTool {
 				input.Limit = 5
 			}
 
-			// Retriever 内部执行：向量化 → Redis 语义缓存比对 → Milvus ANN 搜索 → 相似度过滤
-			rr, rrErr := retriever.GetRetriever(ctx)
+			g.Log().Infof(ctx, "[Tool] search_similar_events 开始 | query=%q | limit=%d", input.Query, input.Limit)
+			rr, rrErr := retriever.GetEventsRetriever(ctx)
 			if rrErr != nil {
 				return "", fmt.Errorf("retriever unavailable: %w", rrErr)
 			}
@@ -132,10 +132,11 @@ func NewSearchSimilarEventsTool() tool.InvokableTool {
 				results = append(results, r)
 			}
 			b, _ := json.Marshal(results)
+			g.Log().Infof(ctx, "[Tool] search_similar_events 完成 | 返回=%d 条", len(results))
 			return string(b), nil
 		})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return t
 }

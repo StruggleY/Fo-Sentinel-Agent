@@ -73,7 +73,7 @@ export default function ThinkingConsole({ logs, isProcessing }: Props) {
   }, [logs])
 
   return (
-    <div className={`flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm transition-all duration-300 ${collapsed ? 'h-[44px]' : 'h-full'} bg-white dark:bg-[#0D1117]`}>
+    <div className={`flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm transition-all duration-300 ${collapsed ? 'h-[44px]' : 'min-h-[370px] max-h-[395px]'} bg-white dark:bg-[#0D1117]`}>
       {/* Header */}
       <div
         className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-[#21262D] bg-gray-50 dark:bg-[#161B22] cursor-pointer select-none shrink-0"
@@ -83,7 +83,6 @@ export default function ThinkingConsole({ logs, isProcessing }: Props) {
           ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
           : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
         {/* 终端提示符风格图标 */}
-        <span className="font-mono text-xs text-primary-500 select-none">&gt;_</span>
         <span className="text-sm font-semibold text-gray-700 dark:text-[#E6EDF3] tracking-wide">思考链路</span>
         <span className="text-xs text-gray-400 dark:text-[#8B949E] font-mono tracking-widest uppercase ml-0.5">REASONING TRACE</span>
 
@@ -106,11 +105,11 @@ export default function ThinkingConsole({ logs, isProcessing }: Props) {
       {!collapsed && (
         <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-1.5 space-y-px scrollbar-thin">
           {logs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full pt-[20%] text-gray-400 dark:text-[#8B949E]">
+            <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-[#8B949E]">
               <span className="font-mono text-xs opacity-50">{'// awaiting agent execution...'}</span>
             </div>
           ) : (
-            logs.map((log, idx) => {
+              logs.map((log, idx) => {
               const color = resolveColor(log.agent)
               const label = shortLabel(log.agent)
               const isEven = idx % 2 === 0
@@ -149,14 +148,6 @@ export default function ThinkingConsole({ logs, isProcessing }: Props) {
                 </div>
               )
             })
-          )}
-
-          {/* 分析中底部光标闪烁 */}
-          {isProcessing && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono text-primary-400">
-              <span className="animate-pulse">▋</span>
-              <span className="text-gray-400">processing...</span>
-            </div>
           )}
         </div>
       )}

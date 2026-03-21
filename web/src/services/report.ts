@@ -121,6 +121,11 @@ export const reportService = {
     await api.post('/report/v1/delete', { id })
   },
 
+  // 批量删除报告（无批量接口，并发单条删除）
+  async batchDelete(ids: string[]): Promise<void> {
+    await Promise.all(ids.map(id => api.post('/report/v1/delete', { id })))
+  },
+
   // 导出报告（后端无此接口，暂时 mock）
   async export(_id: string, _format: string): Promise<Blob> {
     return new Blob([''])

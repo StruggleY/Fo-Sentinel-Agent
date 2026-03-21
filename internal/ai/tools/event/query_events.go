@@ -1,19 +1,19 @@
 package event
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
-	"Fo-Sentinel-Agent/internal/dao"
-	"Fo-Sentinel-Agent/utility/client"
-	"Fo-Sentinel-Agent/utility/common"
+	milvus "Fo-Sentinel-Agent/internal/dao/milvus"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 )
 
@@ -64,6 +64,32 @@ func NewQueryEventsTool() tool.InvokableTool {
 				limit = 50
 			}
 
+			// 只打印非空过滤条件，减少日志噪音
+			var filters []string
+			if input.Severity != "" {
+				filters = append(filters, "severity="+input.Severity)
+			}
+			if input.Status != "" {
+				filters = append(filters, "status="+input.Status)
+			}
+			if input.CveID != "" {
+				filters = append(filters, "cve_id="+input.CveID)
+			}
+			if input.Keyword != "" {
+				filters = append(filters, "keyword="+input.Keyword)
+			}
+			if input.TimeFrom != "" {
+				filters = append(filters, "from="+input.TimeFrom)
+			}
+			if input.TimeTo != "" {
+				filters = append(filters, "to="+input.TimeTo)
+			}
+			filterStr := "-"
+			if len(filters) > 0 {
+				filterStr = strings.Join(filters, " | ")
+			}
+			g.Log().Infof(ctx, "[Tool] query_events | filters=[%s] | limit=%d", filterStr, limit)
+
 			// 构建查询条件
 			q := db.Limit(limit).Order("created_at DESC")
 			if input.Severity != "" {
@@ -106,13 +132,33 @@ func NewQueryEventsTool() tool.InvokableTool {
 			}
 			contentMap := fetchMilvusContentByIDs(ctx, indexedIDs)
 
+			// 内容截断策略：结果集越大，单条内容越短，总体 token 保持在合理范围内
+			//   ≤ 5  条：全量内容（深度分析场景）
+			//   ≤ 20 条：最多 800 字符（中等分析）
+			//   > 20 条：最多 200 字符（批量报告场景，以元数据为主）
+			maxContentLen := 800
+			switch {
+			case len(events) <= 5:
+				maxContentLen = -1 // 不截断
+			case len(events) <= 20:
+				maxContentLen = 800
+			default:
+				maxContentLen = 200
+			}
+
 			// 组装结果
 			results := make([]EventResult, 0, len(events))
 			for _, e := range events {
+				content := contentMap[e.ID]
+				if maxContentLen > 0 {
+					if runes := []rune(content); len(runes) > maxContentLen {
+						content = string(runes[:maxContentLen]) + "..."
+					}
+				}
 				r := EventResult{
 					ID:        e.ID,
 					Title:     e.Title,
-					Content:   contentMap[e.ID], // 已索引事件有内容，未索引为空字符串
+					Content:   content,
 					EventType: e.EventType,
 					Severity:  e.Severity,
 					Status:    e.Status,
@@ -128,11 +174,16 @@ func NewQueryEventsTool() tool.InvokableTool {
 				results = append(results, r)
 			}
 
-			b, _ := json.Marshal(results)
-			return string(b), nil
+			var buf bytes.Buffer
+			enc := json.NewEncoder(&buf)
+			enc.SetEscapeHTML(false)
+			_ = enc.Encode(results)
+			g.Log().Infof(ctx, "[Tool] query_events 完成 | 返回=%d 条 | 已索引=%d 条",
+				len(results), len(indexedIDs))
+			return strings.TrimRight(buf.String(), "\n"), nil
 		})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return t
 }
@@ -145,7 +196,7 @@ func fetchMilvusContentByIDs(ctx context.Context, ids []string) map[string]strin
 		return result
 	}
 
-	milvusCli, err := client.GetMilvusClient(ctx)
+	milvusCli, err := milvus.GetClient(ctx)
 	if err != nil {
 		return result
 	}
@@ -157,7 +208,7 @@ func fetchMilvusContentByIDs(ctx context.Context, ids []string) map[string]strin
 	}
 	expr := fmt.Sprintf("id in [%s]", strings.Join(quoted, ", "))
 
-	cols, err := milvusCli.Query(ctx, common.MilvusCollectionName, nil, expr, []string{"id", "content"})
+	cols, err := milvusCli.Query(ctx, milvus.CollectionName, nil, expr, []string{"id", "content"})
 	if err != nil {
 		return result
 	}

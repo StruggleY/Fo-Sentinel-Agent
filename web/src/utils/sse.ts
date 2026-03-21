@@ -6,21 +6,30 @@
  *   data: <content>\n
  *   \n
  *
+ * 支持的事件类型：
+ *   - meta      会话元数据（sessionId、timestamp），在流开始时推送一次
+ *   - status    处理状态通知（路由、Agent 切换）
+ *   - chat/event/report/risk/solve  各 Agent 的内容流
+ *   - error     错误通知
+ *   - done      流结束
+ *
  * 流结束标志：data: [DONE]\n\n
  *
- * 适用所有 SSE 端点：intent、pipeline/stream、skills/execute、chat_stream
+ * 适用所有 SSE 端点：intent、pipeline/stream、chat_stream
  */
 export function streamFetch(
   url: string,
   body: unknown,
   onChunk: (type: string, content: string) => void,
   onDone: () => void,
-  onError?: (e: Error) => void
+  onError?: (e: Error) => void,
+  signal?: AbortSignal
 ): void {
   fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   })
     .then(async res => {
       const reader = res.body?.getReader()
@@ -62,5 +71,9 @@ export function streamFetch(
       }
       onDone()
     })
-    .catch(e => onError?.(e instanceof Error ? e : new Error(String(e))))
+    .catch(e => {
+      // AbortError 是主动取消，不触发 onError
+      if (e instanceof Error && e.name === 'AbortError') return
+      onError?.(e instanceof Error ? e : new Error(String(e)))
+    })
 }

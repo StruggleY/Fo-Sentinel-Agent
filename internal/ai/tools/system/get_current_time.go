@@ -3,11 +3,11 @@ package system
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // GetCurrentTimeInput 获取当前时间的输入参数（无需输入）
@@ -31,18 +31,14 @@ func NewGetCurrentTimeTool() tool.InvokableTool {
 		"get_current_time",
 		"Get current system time in multiple formats. Returns the current time in seconds (Unix timestamp), milliseconds, and microseconds. Use this tool when you need to retrieve current system time for logging, timing operations, or timestamping events.",
 		func(ctx context.Context, input *GetCurrentTimeInput, opts ...tool.Option) (output string, err error) {
-			// 获取当前时间
 			now := time.Now()
+			seconds := now.Unix()
+			milliseconds := now.UnixMilli()
+			microseconds := now.UnixMicro()
+			timestamp := now.Format("2006-01-02 15:04:05")
 
-			// 计算各种时间格式
-			seconds := now.Unix()                                 // 秒
-			milliseconds := now.UnixMilli()                       // 毫秒
-			microseconds := now.UnixMicro()                       // 微秒
-			timestamp := now.Format("2006-01-02 15:04:05.000000") // 可读格式
+			g.Log().Debugf(ctx, "[Tool] get_current_time | timestamp=%s", timestamp)
 
-			log.Printf("Getting current time: %s", timestamp)
-
-			// 构建输出
 			timeOutput := GetCurrentTimeOutput{
 				Success:      true,
 				Seconds:      seconds,
@@ -52,19 +48,16 @@ func NewGetCurrentTimeTool() tool.InvokableTool {
 				Message:      "Current time retrieved successfully",
 			}
 
-			// 转换为JSON
 			jsonBytes, err := json.MarshalIndent(timeOutput, "", "  ")
 			if err != nil {
-				log.Printf("Error marshaling result to JSON: %v", err)
+				g.Log().Warningf(ctx, "[Tool] get_current_time 序列化失败: %v", err)
 				return "", err
 			}
-
-			log.Printf("Current time: Seconds=%d, Milliseconds=%d, Microseconds=%d", seconds, milliseconds, microseconds)
 			return string(jsonBytes), nil
 		})
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	return t

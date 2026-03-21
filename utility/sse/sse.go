@@ -11,6 +11,7 @@ package sse
 
 import (
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -18,9 +19,12 @@ import (
 )
 
 // Client SSE 写入器，直接向 HTTP Response 写入标准 SSE 事件。
+// mu 保证 Send/SendHeartbeat/Done 在并发调用时（如心跳 goroutine 与主 handler goroutine）不会交错写入，
+// 防止 SSE 流字节损坏导致前端解析器丢弃事件。
 type Client struct {
 	Id      string
 	Request *ghttp.Request
+	mu      sync.Mutex
 }
 
 // NewClient 创建 Client 并设置 SSE 必要响应头。
@@ -39,6 +43,8 @@ func NewClient(r *ghttp.Request) *Client {
 // eventType 为事件类型（如 "message"、"error"），data 为事件内容。
 // 如果 data 包含换行符，会自动分成多行，每行都以 "data: " 开头（符合 SSE 协议）。
 func (c *Client) Send(eventType, data string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.Request.Response.Writef("id: %d\nevent: %s\n", time.Now().UnixNano(), eventType)
 
 	// 处理多行内容：将每行都以 "data: " 开头
@@ -53,6 +59,8 @@ func (c *Client) Send(eventType, data string) {
 
 // Done 推送流结束标志，通知前端关闭读流。
 func (c *Client) Done() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.Request.Response.Writef("data: [DONE]\n\n")
 	c.Request.Response.Flush()
 }
@@ -60,6 +68,8 @@ func (c *Client) Done() {
 // SendHeartbeat 推送 SSE 心跳注释行，防止代理/浏览器因空闲超时断连。
 // 建议每 15s 调用一次。
 func (c *Client) SendHeartbeat() {
-	c.Request.Response.Writefln(": keepalive\n")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Request.Response.Writef(": keepalive\n\n")
 	c.Request.Response.Flush()
 }

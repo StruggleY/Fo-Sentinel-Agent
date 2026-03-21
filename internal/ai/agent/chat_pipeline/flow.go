@@ -4,13 +4,12 @@ import (
 	"context"
 
 	toolsevent "Fo-Sentinel-Agent/internal/ai/tools/event"
-	toolsobserve "Fo-Sentinel-Agent/internal/ai/tools/observe"
+	toolsintelligence "Fo-Sentinel-Agent/internal/ai/tools/intelligence"
 	toolsreport "Fo-Sentinel-Agent/internal/ai/tools/report"
 	toolssystem "Fo-Sentinel-Agent/internal/ai/tools/system"
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
-	"github.com/gogf/gf/v2/frame/g"
 )
 
 // newReactAgentLambda 构建 ReAct Agent 并包装为 DAG 可用的 Lambda 节点。
@@ -48,18 +47,6 @@ func newReactAgentLambda(ctx context.Context) (lba *compose.Lambda, err error) {
 	//   - 入参 JSON Schema（框架自动校验 LLM 传入的参数格式）
 	//   - 执行函数（实际业务逻辑）
 
-	// 腾讯云 CLS 日志查询（MCP 协议）：通过 SSE 连接腾讯云 MCP Server，
-	// 动态获取 SearchLog 等日志工具，供 LLM 查询生产日志。
-	// MCP 服务不可用时（未配置或连接失败）优雅跳过，不影响其他工具的注册。
-	if mcpTool, err := toolsobserve.GetLogMcpTool(ctx); err != nil {
-		g.Log().Warningf(ctx, "[ChatPipeline] MCP 日志工具加载失败，跳过: %v", err)
-	} else {
-		config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, mcpTool...)
-	}
-
-	// Prometheus 告警查询：调用本地 Prometheus HTTP API，获取当前所有 firing 告警列表
-	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsobserve.NewQueryMetricsAlertsTool())
-
 	// 数据库只读查询：执行任意 SELECT 语句，覆盖专用工具未提供的聚合/跨表查询场景
 	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolssystem.NewQueryDatabaseTool())
 
@@ -75,6 +62,9 @@ func newReactAgentLambda(ctx context.Context) (lba *compose.Lambda, err error) {
 	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsevent.NewQuerySubscriptionsTool())
 	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsreport.NewQueryReportsTool())
 	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsevent.NewSearchSimilarEventsTool())
+
+	// 联网搜索：仅当 context 中 WebSearchEnabledKey{}=true 时实际执行，否则返回提示
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsintelligence.NewWebSearchTool())
 
 	// react.NewAgent 根据上述配置实例化 ReAct Agent，
 	// 内部维护消息历史，每轮将 Observation 追加后重新调用 LLM。

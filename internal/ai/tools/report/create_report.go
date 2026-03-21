@@ -1,10 +1,9 @@
 package report
 
 import (
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -46,7 +45,7 @@ func NewCreateReportTool() tool.InvokableTool {
 			return fmt.Sprintf("Report created: id=%s, title=%s", r.ID, r.Title), nil
 		})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return t
 }

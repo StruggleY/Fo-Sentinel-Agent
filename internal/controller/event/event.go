@@ -15,6 +15,7 @@ import (
 	v1 "Fo-Sentinel-Agent/api/event/v1"
 	"Fo-Sentinel-Agent/internal/ai/agent/event_analysis_pipeline"
 	"Fo-Sentinel-Agent/internal/ai/models"
+	"Fo-Sentinel-Agent/internal/ai/trace"
 	eventsvc "Fo-Sentinel-Agent/internal/service/event"
 	"Fo-Sentinel-Agent/utility/sse"
 
@@ -50,19 +51,20 @@ func (c *ControllerV1) List(ctx context.Context, req *v1.ListReq) (*v1.ListRes, 
 			ID:        e.ID,
 			Title:     e.Title,
 			Content:   "",
+			EventType: e.EventType,
 			Severity:  e.Severity,
 			Source:    e.Source,
 			SourceURL: sourceURL,
 			Status:    e.Status,
 			CVEID:     e.CVEID,
 			RiskScore: e.RiskScore,
-			CreatedAt: e.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), // ISO 8601 格式，兼容所有浏览器
+			CreatedAt: e.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}
 	return &v1.ListRes{Total: total, Events: items}, nil
 }
 
-// Stats 返回事件统计数据：总数、今日新增、高危数量、按严重程度分组。
+// Stats 返回事件统计数据：总数、今日新增、高危数量、按严重程度分组、近7天新增、待处置数。
 func (c *ControllerV1) Stats(ctx context.Context, req *v1.StatsReq) (*v1.StatsRes, error) {
 	stats, err := eventsvc.Stats(ctx)
 	if err != nil {
@@ -73,6 +75,8 @@ func (c *ControllerV1) Stats(ctx context.Context, req *v1.StatsReq) (*v1.StatsRe
 		TodayCount:    stats.TodayCount,
 		CriticalCount: stats.CriticalCount,
 		BySeverity:    stats.BySeverity,
+		New7Days:      stats.New7Days,
+		Pending:       stats.Pending,
 	}, nil
 }
 
@@ -121,30 +125,60 @@ func (c *ControllerV1) Delete(ctx context.Context, req *v1.DeleteReq) (*v1.Delet
 	return &v1.DeleteRes{}, nil
 }
 
+// BatchDelete 批量软删除安全事件，委托 eventsvc.BatchDelete 处理。
+func (c *ControllerV1) BatchDelete(ctx context.Context, req *v1.BatchDeleteReq) (*v1.BatchDeleteRes, error) {
+	if err := eventsvc.BatchDelete(ctx, req.IDs); err != nil {
+		return nil, err
+	}
+	return &v1.BatchDeleteRes{}, nil
+}
+
+// BatchUpdateStatus 批量更新安全事件状态，委托 eventsvc.BatchUpdateStatus 处理。
+func (c *ControllerV1) BatchUpdateStatus(ctx context.Context, req *v1.BatchUpdateStatusReq) (*v1.BatchUpdateStatusRes, error) {
+	if err := eventsvc.BatchUpdateStatus(ctx, req.IDs, req.Status); err != nil {
+		return nil, err
+	}
+	return &v1.BatchUpdateStatusRes{}, nil
+}
+
 // PipelineStream 触发 Event Analysis Agent（ReAct 智能体）进行流式事件分析，SSE 逐 chunk 推送结果。
 func (c *ControllerV1) PipelineStream(ctx context.Context, req *v1.PipelineStreamReq) (*v1.PipelineStreamRes, error) {
+	// 启动链路追踪
+	ctx = trace.StartRun(ctx, "event.pipeline", "/api/event/v1/pipeline/stream", "", req.Query, nil)
+	var pipelineErr error
+	defer func() { trace.FinishRun(ctx, pipelineErr) }()
+
 	client := sse.NewClient(g.RequestFromCtx(ctx))
 
 	// 获取事件分析 Agent 单例（内含 RAG 管道 + ReAct 推理循环）
 	runner, err := event_analysis_pipeline.GetEventAnalysisAgent(ctx)
 	if err != nil {
+		pipelineErr = err
 		client.Send("error", err.Error())
 		client.Done()
 		return nil, nil
 	}
+
+	// AGENT span：使内部 LLM/TOOL/RETRIEVER 节点归属到 EventAnalysisAgent 下，
+	// 而非直接挂在链路根节点，保持与 intent/executor.go 路径的一致性。
+	spanCtx, spanID := trace.StartSpan(ctx, trace.NodeTypeAgent, "EventAnalysisAgent")
+
 	// 以流式模式调用 Agent，逐 chunk 接收推理过程和最终结论
-	sr, err := runner.Stream(ctx, &event_analysis_pipeline.UserMessage{
+	sr, err := runner.Stream(spanCtx, &event_analysis_pipeline.UserMessage{
 		ID:      "stream",
 		Query:   req.Query,
 		History: nil, // 事件分析不携带历史上下文，每次独立分析
 	})
 	if err != nil {
+		pipelineErr = err
+		trace.FinishSpan(spanCtx, spanID, err, nil)
 		client.Send("error", err.Error())
 		client.Done()
 		return nil, nil
 	}
 	defer sr.Close()
 
+	var spanErr error
 	for {
 		chunk, err := sr.Recv()
 		if errors.Is(err, io.EOF) {
@@ -153,6 +187,8 @@ func (c *ControllerV1) PipelineStream(ctx context.Context, req *v1.PipelineStrea
 			break
 		}
 		if err != nil {
+			pipelineErr = err
+			spanErr = err
 			client.Send("error", err.Error())
 			break
 		}
@@ -163,6 +199,7 @@ func (c *ControllerV1) PipelineStream(ctx context.Context, req *v1.PipelineStrea
 			client.Send("message", string(jsonBytes))
 		}
 	}
+	trace.FinishSpan(spanCtx, spanID, spanErr, nil)
 	client.Done()
 	return nil, nil
 }
@@ -173,16 +210,15 @@ func (c *ControllerV1) PipelineStream(ctx context.Context, req *v1.PipelineStrea
 func (c *ControllerV1) AnalyzeSingleStream(ctx context.Context, req *v1.AnalyzeSingleStreamReq) (*v1.AnalyzeSingleStreamRes, error) {
 	client := sse.NewClient(g.RequestFromCtx(ctx))
 
-	g.Log().Infof(ctx, "[AnalyzeSingleStream] 收到请求: event_id=%s title=%s severity=%s", req.EventID, req.Title, req.Severity)
+	g.Log().Infof(ctx, "[AnalyzeSingleStream] 收到请求 | event_id=%s | title=%s | severity=%s", req.EventID, req.Title, req.Severity)
 
 	m, err := models.OpenAIForDeepSeekV3Quick(ctx)
 	if err != nil {
-		g.Log().Errorf(ctx, "[AnalyzeSingleStream] 初始化模型失败: %v", err)
+		g.Log().Errorf(ctx, "[AnalyzeSingleStream] 模型初始化失败 | err=%v", err)
 		client.Send("error", err.Error())
 		client.Done()
 		return nil, nil
 	}
-	g.Log().Infof(ctx, "[AnalyzeSingleStream] 模型初始化成功，准备调用 Stream")
 
 	cveInfo := ""
 	if req.CVEID != "" {
@@ -216,34 +252,33 @@ func (c *ControllerV1) AnalyzeSingleStream(ctx context.Context, req *v1.AnalyzeS
 
 	sr, err := m.Stream(ctx, messages)
 	if err != nil {
-		g.Log().Errorf(ctx, "[AnalyzeSingleStream] Stream 调用失败: %v", err)
+		g.Log().Errorf(ctx, "[AnalyzeSingleStream] Stream 调用失败 | err=%v", err)
 		client.Send("error", err.Error())
 		client.Done()
 		return nil, nil
 	}
 	defer sr.Close()
-	g.Log().Infof(ctx, "[AnalyzeSingleStream] Stream 已启动，开始接收 chunks")
 
 	chunkCount := 0
 	for {
 		chunk, err := sr.Recv()
 		if errors.Is(err, io.EOF) {
-			g.Log().Infof(ctx, "[AnalyzeSingleStream] Stream 结束，共收到 %d 个有效 chunk", chunkCount)
+			g.Log().Debugf(ctx, "[AnalyzeSingleStream] Stream 结束 | chunks=%d", chunkCount)
 			client.Send("done", "Stream completed")
 			break
 		}
 		if err != nil {
 			// context.Canceled 是客户端主动断开连接（前端关闭面板），属正常行为，降级为 info 避免误报
 			if errors.Is(err, context.Canceled) {
-				g.Log().Infof(ctx, "[AnalyzeSingleStream] 客户端断开连接，已输出 %d chunks", chunkCount)
+				g.Log().Warningf(ctx, "[AnalyzeSingleStream] 客户端主动断开连接 | chunks=%d", chunkCount)
 			} else {
-				g.Log().Errorf(ctx, "[AnalyzeSingleStream] Recv 错误 (已收到 %d chunks): %v", chunkCount, err)
+				g.Log().Errorf(ctx, "[AnalyzeSingleStream] Stream 接收异常 | chunks=%d | err=%v", chunkCount, err)
 				client.Send("error", err.Error())
 			}
 			break
 		}
 		if chunk == nil {
-			g.Log().Warningf(ctx, "[AnalyzeSingleStream] 收到 nil chunk，跳过")
+			g.Log().Debugf(ctx, "[AnalyzeSingleStream] 收到空 chunk，跳过")
 			continue
 		}
 		if strings.TrimSpace(chunk.Content) != "" {

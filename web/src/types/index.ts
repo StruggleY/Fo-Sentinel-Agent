@@ -68,6 +68,7 @@ export interface SecurityEvent {
   id: string
   subscription_id: number
   title: string
+  event_type?: string
   severity: SeverityLevel
   status: EventStatus
   source: string
@@ -306,6 +307,11 @@ export interface TrendData {
   medium: number
   low: number
   info: number
+}
+
+// ==================== 文件上传配置类型 ====================
+export interface UploadConfig {
+  strategy: 'fixed_size' | 'structure_aware' | 'hierarchical'
 }
 
 // ==================== 审计日志类型 ====================

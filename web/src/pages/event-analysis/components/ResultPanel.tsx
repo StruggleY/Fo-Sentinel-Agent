@@ -190,42 +190,37 @@ function CompactCard({ event, onClick }: { event: EventData; onClick: () => void
   )
 }
 
+// 并发控制：最多同时跑 MAX_CONCURRENT 个解决方案 fetch，超出部分入队等待。
+// 超时控制：每条 fetch 最多等待 FETCH_TIMEOUT_MS 毫秒，超时后标记完成，停止 spinner。
+const MAX_CONCURRENT = 3
+const FETCH_TIMEOUT_MS = 90_000
+
 // ─── ResultPanel：统一管理所有解决方案 fetch ───────────────────────────────────
-// 核心设计：fetch 生命周期绑定到 ResultPanel，而非 EventDetail。
-// 关闭 EventDetail 只是隐藏面板，不 abort fetch，流式生成在后台持续进行。
 export default function ResultPanel({ data, isProcessing, onSolutionUpdate }: Props) {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const selectedEvent = data?.events?.find(e => e.event_id === selectedEventId) ?? null
 
-  // 解决方案缓存：event_id → { content, complete }
-  // useRef 避免缓存写入触发 ResultPanel 重渲染（重渲染由 cacheVersion 精确控制）
   const solutionCache = useRef<Map<string, SolutionEntry>>(new Map())
-
-  // 正在进行中的 fetch set（不触发渲染，仅用于幂等性判断）
   const activeStreams = useRef<Set<string>>(new Set())
-
-  // 版本号：cache 内容变化时递增，触发 ResultPanel 重渲染以刷新 EventDetail 的 props
   const [cacheVersion, setCacheVersion] = useState(0)
-
-  // onSolutionUpdate 稳定引用，避免 startFetch 每次重建
   const onSolutionUpdateRef = useRef(onSolutionUpdate)
   useEffect(() => { onSolutionUpdateRef.current = onSolutionUpdate }, [onSolutionUpdate])
 
-  /**
-   * startFetch：后台启动某事件的解决方案 fetch。
-   * - 幂等：同一事件已在 activeStreams 中 或 缓存已 complete 则直接返回
-   * - 无 AbortController：关闭 EventDetail 不会中断流，内容持续写入缓存
-   * - 写入 solutionCache 后调用 setCacheVersion 触发重渲染，EventDetail 拿到最新 props
-   */
-  const startFetch = useCallback((event: EventData) => {
-    const { event_id } = event
-    if (!event_id) return
-    if (activeStreams.current.has(event_id)) return
-    const cached = solutionCache.current.get(event_id)
-    if (cached?.complete) return
+  // 并发队列
+  const pendingQueue = useRef<EventData[]>([])
+  const activeCount = useRef(0)
 
+  // launchFetch：真正执行 fetch，带超时控制，完成后自动从队列取下一条
+  // 用 ref 存储以避免 useCallback 的循环依赖（finally 中调用自身）
+  const launchFetchRef = useRef<(event: EventData) => void>(() => {})
+  launchFetchRef.current = (event: EventData) => {
+    const { event_id } = event
     activeStreams.current.add(event_id)
-    let accumulated = cached?.content ?? ''  // 有残缺缓存则接续（不重复内容，后端仍从头生成）
+    activeCount.current++
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    let accumulated = ''
 
     fetch('/api/event/v1/analyze/stream', {
       method: 'POST',
@@ -237,7 +232,7 @@ export default function ResultPanel({ data, isProcessing, onSolutionUpdate }: Pr
         cve_id: event.cve_id,
         source: event.source,
       }),
-      // 无 signal：intentional，fetch 生命周期独立于任何组件
+      signal: controller.signal,
     })
       .then(async (res) => {
         if (!res.ok) return
@@ -245,7 +240,7 @@ export default function ResultPanel({ data, isProcessing, onSolutionUpdate }: Pr
         if (!reader) return
         const decoder = new TextDecoder()
         let buf = ''
-        accumulated = ''  // 后端从头流式输出，重置 accumulated 避免内容翻倍
+        accumulated = ''
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
@@ -267,19 +262,46 @@ export default function ResultPanel({ data, isProcessing, onSolutionUpdate }: Pr
           }
         }
       })
-      .catch(() => { /* 网络错误，静默处理 */ })
+      .catch(() => { /* AbortError（超时）或网络错误，在 finally 中统一处理 */ })
       .finally(() => {
+        clearTimeout(timeoutId)
         activeStreams.current.delete(event_id)
-        if (accumulated) {
+        activeCount.current--
+        // 无论成功/失败/超时，都标记为 complete 让 spinner 停止
+        if (!solutionCache.current.get(event_id)?.complete) {
           solutionCache.current.set(event_id, { content: accumulated, complete: true })
-          onSolutionUpdateRef.current?.(event_id, accumulated, true)
+          if (accumulated) {
+            onSolutionUpdateRef.current?.(event_id, accumulated, true)
+          }
         }
         setCacheVersion(v => v + 1)
+        // 从队列取下一条继续处理
+        if (pendingQueue.current.length > 0) {
+          const next = pendingQueue.current.shift()!
+          launchFetchRef.current(next)
+        }
       })
-  }, [])  // 无外部依赖（onSolutionUpdate 通过 ref 稳定访问）
+  }
 
-  // 从持久化 events 预填已完成的解决方案（页面刷新后避免重新生成）
+  // startFetch：幂等入口，检查去重后决定立即启动或入队
+  const startFetch = useCallback((event: EventData) => {
+    const { event_id } = event
+    if (!event_id) return
+    if (activeStreams.current.has(event_id)) return
+    if (pendingQueue.current.some(e => e.event_id === event_id)) return
+    const cached = solutionCache.current.get(event_id)
+    if (cached?.complete) return
+
+    if (activeCount.current < MAX_CONCURRENT) {
+      launchFetchRef.current(event)
+    } else {
+      pendingQueue.current.push(event)
+    }
+  }, [])
+
+  // data 变化时：重置队列，预填已持久化的解决方案
   useEffect(() => {
+    pendingQueue.current = []
     if (!data?.events) return
     for (const ev of data.events) {
       if (ev.recommendationComplete && ev.recommendation) {
@@ -289,9 +311,9 @@ export default function ResultPanel({ data, isProcessing, onSolutionUpdate }: Pr
     setCacheVersion(v => v + 1)
   }, [data])
 
-  // 分析结果到来后，自动预加载所有事件的解决方案（已完成的跳过）
+  // 分析结果到来后，自动预加载所有事件的解决方案（受并发限制，超出部分入队）
   useEffect(() => {
-    const targets = (data?.events || []).slice(0, 30)
+    const targets = (data?.events || []).slice(0, 10)
     for (const ev of targets) {
       startFetch(ev)
     }
@@ -322,7 +344,7 @@ export default function ResultPanel({ data, isProcessing, onSolutionUpdate }: Pr
   // Empty state
   if (!data?.events?.length) {
     return (
-      <div className="h-full flex flex-col items-center justify-start pt-[25%] text-gray-500 dark:text-[#8B949E] bg-white dark:bg-[#080C13]/95">
+      <div className="flex flex-col items-center justify-center min-h-[600px] text-gray-500 dark:text-[#8B949E] bg-white dark:bg-[#080C13]/95">
         <Shield className="w-10 h-10 mb-2.5 opacity-20" />
         <p className="text-sm tracking-wide">启动分析后查看结果</p>
         <p className="text-xs text-gray-300 dark:text-[#30363D] mt-1 font-mono">AWAITING ANALYSIS</p>

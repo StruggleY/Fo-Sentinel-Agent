@@ -27,6 +27,7 @@ type EventItem struct {
 	ID        string  `json:"id"`
 	Title     string  `json:"title"`
 	Content   string  `json:"content"`
+	EventType string  `json:"event_type,omitempty"`
 	Severity  string  `json:"severity"`
 	Source    string  `json:"source"`
 	SourceURL string  `json:"source_url,omitempty"`
@@ -63,6 +64,8 @@ type StatsRes struct {
 	TodayCount    int64            `json:"today_count"`
 	CriticalCount int64            `json:"critical_count"`
 	BySeverity    map[string]int64 `json:"by_severity"`
+	New7Days      int64            `json:"new_7days"` // 近7天新增
+	Pending       int64            `json:"pending"`   // 待处置（status='new'）
 }
 
 // TrendReq 事件趋势
@@ -104,6 +107,25 @@ type DeleteReq struct {
 
 // DeleteRes 删除响应
 type DeleteRes struct{}
+
+// BatchDeleteReq 批量删除安全事件
+type BatchDeleteReq struct {
+	g.Meta `path:"/event/v1/batch_delete" method:"post" summary:"批量删除安全事件"`
+	IDs    []string `json:"ids" v:"required"`
+}
+
+// BatchDeleteRes 批量删除响应
+type BatchDeleteRes struct{}
+
+// BatchUpdateStatusReq 批量更新事件状态
+type BatchUpdateStatusReq struct {
+	g.Meta `path:"/event/v1/batch_update_status" method:"post" summary:"批量更新事件状态"`
+	IDs    []string `json:"ids" v:"required"`
+	Status string   `json:"status" v:"required|in:new,processing,resolved,ignored"`
+}
+
+// BatchUpdateStatusRes 批量更新响应
+type BatchUpdateStatusRes struct{}
 
 // AnalyzeSingleStreamReq 单条事件 AI 解决方案（SSE 流式）
 type AnalyzeSingleStreamReq struct {

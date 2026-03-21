@@ -12,6 +12,7 @@ interface EventListResponse {
   events: Array<{
     id: string
     title: string
+    event_type?: string
     severity: string
     source: string
     source_url?: string
@@ -28,6 +29,8 @@ interface EventStatsResponse {
   today_count: number
   critical_count: number
   by_severity: Record<string, number>
+  new_7days: number
+  pending: number
 }
 
 // 后端 /event/v1/trend 返回格式
@@ -65,6 +68,7 @@ export const eventService = {
       id: item.id,
       subscription_id: 0,
       title: item.title,
+      event_type: item.event_type,
       severity: (item.severity || 'medium') as SecurityEvent['severity'],
       status: (item.status || 'new') as SecurityEvent['status'],
       source: item.source || '',
@@ -101,6 +105,16 @@ export const eventService = {
     await api.post('/event/v1/delete', { id })
   },
 
+  // 批量删除安全事件（POST /event/v1/batch_delete）
+  async batchDelete(ids: string[]): Promise<void> {
+    await api.post('/event/v1/batch_delete', { ids })
+  },
+
+  // 批量更新事件状态（POST /event/v1/batch_update_status）
+  async batchUpdateStatus(ids: string[], status: string): Promise<void> {
+    await api.post('/event/v1/batch_update_status', { ids, status })
+  },
+
   // 获取事件统计（调用后端 GET /event/v1/stats）
   async getStats(): Promise<{
     total: number
@@ -108,6 +122,8 @@ export const eventService = {
     critical_count: number
     by_severity: Record<string, number>
     by_status: Record<string, number>
+    new_7days: number
+    pending: number
   }> {
     try {
       const res = await api.get<ApiResponse<EventStatsResponse>>('/event/v1/stats')
@@ -118,9 +134,11 @@ export const eventService = {
         critical_count: data?.critical_count || 0,
         by_severity: data?.by_severity || {},
         by_status: {},
+        new_7days: data?.new_7days || 0,
+        pending: data?.pending || 0,
       }
     } catch {
-      return { total: 0, today_count: 0, critical_count: 0, by_severity: {}, by_status: {} }
+      return { total: 0, today_count: 0, critical_count: 0, by_severity: {}, by_status: {}, new_7days: 0, pending: 0 }
     }
   },
 

@@ -1,14 +1,14 @@
 package event
 
 import (
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // QuerySubscriptionsInput 查询订阅参数
@@ -26,6 +26,17 @@ func NewQuerySubscriptionsTool() tool.InvokableTool {
 			if err != nil {
 				return "", fmt.Errorf("database not available: %w", err)
 			}
+
+			enabledFilter := "all"
+			if input != nil && input.Enabled != nil {
+				if *input.Enabled {
+					enabledFilter = "true"
+				} else {
+					enabledFilter = "false"
+				}
+			}
+			g.Log().Infof(ctx, "[Tool] query_subscriptions 开始 | enabled=%s", enabledFilter)
+
 			var subs []dao.Subscription
 			q := db.Order("created_at DESC")
 			if input != nil && input.Enabled != nil {
@@ -34,11 +45,13 @@ func NewQuerySubscriptionsTool() tool.InvokableTool {
 			if err = q.Find(&subs).Error; err != nil {
 				return "", fmt.Errorf("query subscriptions: %w", err)
 			}
+
+			g.Log().Infof(ctx, "[Tool] query_subscriptions 完成 | 返回=%d 条", len(subs))
 			b, _ := json.Marshal(subs)
 			return string(b), nil
 		})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return t
 }

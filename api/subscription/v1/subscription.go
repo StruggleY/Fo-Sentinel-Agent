@@ -83,30 +83,6 @@ type ResumeReq struct {
 // ResumeRes 恢复响应
 type ResumeRes struct{}
 
-// FetchLogsReq 订阅抓取日志列表
-type FetchLogsReq struct {
-	g.Meta         `path:"/subscription/v1/logs" method:"get" summary:"抓取日志列表"`
-	SubscriptionID string `json:"subscription_id" v:"required"`
-	Limit          int    `json:"limit" d:"20"`
-	Offset         int    `json:"offset" d:"0"`
-}
-
-// FetchLogItem 日志项
-type FetchLogItem struct {
-	ID           int64  `json:"id"`
-	Status       string `json:"status"`
-	FetchedCount int    `json:"fetched_count"`
-	NewCount     int    `json:"new_count"`
-	DurationMs   int64  `json:"duration_ms"`
-	ErrorMsg     string `json:"error_msg,omitempty"`
-	CreatedAt    string `json:"created_at"`
-}
-
-// FetchLogsRes 抓取日志响应
-type FetchLogsRes struct {
-	Total int64          `json:"total"`
-	Logs  []FetchLogItem `json:"logs"`
-}
 type FetchReq struct {
 	g.Meta `path:"/subscription/v1/fetch" method:"post" summary:"手动触发抓取"`
 	ID     string `json:"id" v:"required"`

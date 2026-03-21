@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { FileText, BrainCircuit, RotateCcw } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import { useEventStore } from '@/stores/eventStore'
 import { useAnalyzeStore } from '@/stores/analyzeStore'
 import AgentFlowGraph from './components/AgentFlowGraph'
@@ -10,15 +11,18 @@ import StartButton from './components/StartButton'
 import ResultPanel from './components/ResultPanel'
 import AnalysisModeSelect, { type AnalysisMode } from './components/AnalysisModeSelect'
 import EventPickerModal from './components/EventPickerModal'
+import ReportModal, { buildMarkdown } from './components/ReportModal'
 import { eventService } from '@/services/event'
+import { reportService } from '@/services/report'
 
 export default function EventAnalysis() {
   const { clearLogs, isProcessing, setProcessing, agentLogs, addLog, terminateRunningLogs } = useEventStore()
-  const { riskData, analysisText, savedAt, setResult, clearResult, updateEventSolution, setReportGenerating } = useAnalyzeStore()
+  const { riskData, analysisText, savedAt, setResult, clearResult, updateEventSolution, reportGenerating, reportSaving, setReportGenerating, setReportSaving } = useAnalyzeStore()
   const location = useLocation()
   const abortControllerRef = useRef<AbortController | null>(null)
+  const stageTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => {
-    return location.state?.mode === 'specific' ? 'specific' : 'today'
+    return location.state?.mode === 'specific' ? 'specific' : 'latest'
   })
   const [selectedEventIds, setSelectedEventIds] = useState<string[]>(() => {
     return location.state?.preSelectedIds ?? []
@@ -46,6 +50,41 @@ export default function EventAnalysis() {
     updateEventSolution(eventId, content)
   }
 
+  const handleSaveReport = async () => {
+    if (!riskData) return
+    setReportSaving(true)
+    try {
+      const now = new Date()
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+      const reportId = `REPORT-${dateStr.replace(/-/g, '')}-${timeStr.replace(':', '')}`
+      const md = buildMarkdown(riskData, agentLogs)
+      const payload = JSON.stringify({
+        format: 'sentinel-report-v1',
+        meta: {
+          report_id: reportId,
+          generated_at: now.toISOString(),
+          event_count: riskData.count,
+          critical_count: riskData.critical ?? 0,
+          high_count: riskData.highRisk ?? 0,
+          max_cvss: riskData.maxCVSS,
+        },
+        risk_data: riskData,
+        analysis_text: analysisText,
+        agent_logs: agentLogs,
+        markdown: md,
+      })
+      await reportService.save(`安全事件分析报告 ${dateStr} ${timeStr}`, payload, 'custom')
+      toast.success('报告已保存到报告库')
+      setReportGenerating(false)
+    } catch (err) {
+      console.error('[handleSaveReport] 保存失败:', err)
+      toast.error('报告保存失败，请重试')
+    } finally {
+      setReportSaving(false)
+    }
+  }
+
   // ── 分析主流程 ────────────────────────────────────────────────────────────────
   const startAnalysis = async () => {
     if (analysisMode === 'specific' && selectedEventIds.length === 0) {
@@ -56,18 +95,11 @@ export default function EventAnalysis() {
     setProcessing(true)
     clearResult()
 
-    const localLogs: typeof agentLogs = []
-    const addLocalLog = (log: Parameters<typeof addLog>[0]) => {
-      addLog(log)
-      localLogs.push(log)
-    }
+    // 清空旧定时器
+    stageTimersRef.current.forEach(t => clearTimeout(t))
+    stageTimersRef.current = []
 
     try {
-      const statsResult = await eventService.getStats()
-      const realCritical = statsResult.by_severity?.critical || 0
-      const realHigh = statsResult.by_severity?.high || 0
-      const realTotal = statsResult.total || 0
-
       const mapEvent = (e: { id: string; title: string; severity: string; source?: string; source_url?: string; cve_id?: string; cvss_score?: number }, idx: number) => ({
         id: idx + 1,
         event_id: e.id,
@@ -89,32 +121,76 @@ export default function EventAnalysis() {
           .filter(e => selectedEventIds.includes(e.id))
           .map((e, idx) => mapEvent(e, idx))
       } else {
-        const [critResult, highResult] = await Promise.all([
-          eventService.list({ severity: 'critical', size: 20 }),
-          eventService.list({ severity: 'high', size: 10 }),
-        ])
-        severeEvents = [...critResult.list, ...highResult.list].slice(0, 30).map((e, idx) => mapEvent(e, idx))
+        // latest：取最近 10 条，按时间倒序
+        const latestRes = await eventService.list({ size: 10 })
+        severeEvents = latestRes.list.map((e, idx) => mapEvent(e, idx))
       }
 
-      const dispCritical = analysisMode === 'specific'
-        ? severeEvents.filter(e => e.severity === 'critical').length
-        : realCritical
-      const dispHigh = analysisMode === 'specific'
-        ? severeEvents.filter(e => e.severity === 'high').length
-        : realHigh
-      const dispTotal = analysisMode === 'specific' ? severeEvents.length : realTotal
-      const dispMaxCVSS = dispCritical > 0 ? 9.0 : dispHigh > 0 ? 7.0 : 5.0
+      const dispCritical = severeEvents.filter(e => e.severity === 'critical').length
+      const dispHigh     = severeEvents.filter(e => e.severity === 'high').length
+      const dispTotal    = severeEvents.length
+      const dispMaxCVSS  = dispCritical > 0 ? 9.0 : dispHigh > 0 ? 7.0 : 5.0
 
       const buildSpecificQuery = () => {
         if (severeEvents.length === 0) return `分析以下事件 ID：${selectedEventIds.join(', ')}`
         const titles = severeEvents.map(e => e.title).join('；')
         return `分析以下安全事件（共 ${severeEvents.length} 条）：${titles}。请评估这些事件的威胁态势并给出处置建议。`
       }
-      const query = analysisMode === 'latest'
-        ? '分析最新10条安全事件，重点关注高危漏洞'
-        : analysisMode === 'today'
-          ? '分析今日新增安全事件，评估当前威胁态势'
-          : buildSpecificQuery()
+      const query = analysisMode === 'specific'
+        ? buildSpecificQuery()
+        : `分析最新 ${dispTotal} 条安全事件，重点关注高危漏洞`
+
+      const agentSequence = ['数据采集Agent', '提取Agent', '去重Agent', '风险评估Agent', '解决方案Agent']
+      const stageStartMessages: Record<string, string> = {
+        '提取Agent':    `正在解析事件特征：CVE 编号、CVSS 评分、漏洞类型...`,
+        '去重Agent':    `正在对比事件指纹哈希，过滤重复数据...`,
+        '风险评估Agent': `正在评估威胁等级：发现 ${dispCritical} 个严重漏洞，${dispHigh} 个高危漏洞`,
+        '解决方案Agent': `正在综合 CVSS ${dispMaxCVSS} 分析生成修复建议...`,
+      }
+      const stageDoneMessages: Record<string, string> = {
+        '数据采集Agent': `采集完成，共获取 ${dispTotal} 条安全事件`,
+        '提取Agent':    `特征提取完成，识别到 ${dispCritical + dispHigh} 条高危事件`,
+        '去重Agent':    `去重完成，有效事件 ${dispTotal} 条`,
+        '风险评估Agent': `风险评估完成，最高 CVSS ${dispMaxCVSS}，需立即处置 ${dispCritical} 条`,
+        '解决方案Agent': `分析完成，AI 研判结论已生成`,
+      }
+
+      let currentStage = 0
+      let finalized = false
+
+      // 立即显示第一阶段（数据采集 running）
+      addLog({ agent: '数据采集Agent', status: 'running', message: `正在采集安全事件数据，共 ${dispTotal} 条...`, timestamp: new Date().toISOString() })
+
+      // 定时推进后续阶段：每 1.5s 前进一步，保证过程可见
+      // 每次 setTimeout 独立触发 React setState，不会被批量合并
+      for (let nextStage = 1; nextStage < agentSequence.length; nextStage++) {
+        const prevStage = nextStage - 1
+        const ns = nextStage
+        const timer = setTimeout(() => {
+          if (finalized) return
+          addLog({ agent: agentSequence[prevStage], status: 'success', message: stageDoneMessages[agentSequence[prevStage]] || '处理完成', timestamp: new Date().toISOString() })
+          currentStage = ns
+          addLog({ agent: agentSequence[ns], status: 'running', message: stageStartMessages[agentSequence[ns]] || '处理中...', timestamp: new Date().toISOString() })
+        }, ns * 1500)
+        stageTimersRef.current.push(timer)
+      }
+
+      const finalize = (text: string) => {
+        if (finalized) return
+        finalized = true
+        stageTimersRef.current.forEach(t => clearTimeout(t))
+        stageTimersRef.current = []
+        // 补全未完成阶段的完成日志
+        for (let s = currentStage; s < agentSequence.length - 1; s++) {
+          addLog({ agent: agentSequence[s], status: 'success', message: stageDoneMessages[agentSequence[s]] || '处理完成', timestamp: new Date().toISOString() })
+        }
+        addLog({ agent: '解决方案Agent', status: 'success', message: stageDoneMessages['解决方案Agent'], timestamp: new Date().toISOString() })
+        setProcessing(false)
+        setResult({
+          riskData: { maxCVSS: dispMaxCVSS, count: dispTotal, avgRisk: 0, critical: dispCritical, highRisk: dispHigh, events: severeEvents },
+          analysisText: text,
+        })
+      }
 
       const controller = new AbortController()
       abortControllerRef.current = controller
@@ -132,44 +208,6 @@ export default function EventAnalysis() {
       let buffer = ''
       let fullText = ''
 
-      const agentSequence = ['数据采集Agent', '提取Agent', '去重Agent', '风险评估Agent', '解决方案Agent']
-      const thresholds = [1, 6, 14, 24, Infinity]
-      let chunkCount = 0
-      let currentStage = 0
-
-      const stageStartMessages: Record<string, string> = {
-        '提取Agent': `正在解析事件特征：CVE 编号、CVSS 评分、漏洞类型...`,
-        '去重Agent': `正在对比事件指纹哈希，过滤重复数据...`,
-        '风险评估Agent': `正在评估威胁等级：发现 ${dispCritical} 个严重漏洞，${dispHigh} 个高危漏洞`,
-        '解决方案Agent': `正在综合 CVSS ${dispMaxCVSS} 分析生成修复建议...`,
-      }
-      const stageDoneMessages: Record<string, string> = {
-        '数据采集Agent': `采集完成，共获取 ${dispTotal} 条安全事件`,
-        '提取Agent': `特征提取完成，识别到 ${dispCritical + dispHigh} 条高危事件`,
-        '去重Agent': `去重完成，有效事件 ${dispTotal} 条`,
-        '风险评估Agent': `风险评估完成，最高 CVSS ${dispMaxCVSS}，需立即处置 ${dispCritical} 条`,
-        '解决方案Agent': `分析完成，AI 研判结论已生成`,
-      }
-
-      const advanceTo = (nextStage: number) => {
-        if (nextStage <= currentStage || nextStage >= agentSequence.length) return
-        addLocalLog({ agent: agentSequence[currentStage], status: 'success', message: stageDoneMessages[agentSequence[currentStage]] || '处理完成', timestamp: new Date().toISOString() })
-        currentStage = nextStage
-        addLocalLog({ agent: agentSequence[nextStage], status: 'running', message: stageStartMessages[agentSequence[nextStage]] || '处理中...', timestamp: new Date().toISOString() })
-      }
-
-      const finalize = (text: string) => {
-        for (let s = currentStage; s < agentSequence.length - 1; s++) {
-          addLocalLog({ agent: agentSequence[s], status: 'success', message: stageDoneMessages[agentSequence[s]] || '处理完成', timestamp: new Date().toISOString() })
-        }
-        addLocalLog({ agent: '解决方案Agent', status: 'success', message: stageDoneMessages['解决方案Agent'], timestamp: new Date().toISOString() })
-        setProcessing(false)
-        setResult({
-          riskData: { maxCVSS: dispMaxCVSS, count: dispTotal, avgRisk: 0, critical: dispCritical, highRisk: dispHigh, events: severeEvents },
-          analysisText: text,
-        })
-      }
-
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -184,17 +222,13 @@ export default function EventAnalysis() {
             const data = JSON.parse(raw)
             if (data.type === 'content' && data.content) {
               fullText += data.content
-              chunkCount++
-              if (chunkCount === 1) {
-                addLocalLog({ agent: '数据采集Agent', status: 'running', message: `正在采集安全事件数据，数据库共 ${dispTotal} 条记录...`, timestamp: new Date().toISOString() })
-              }
-              for (let s = 1; s < thresholds.length; s++) {
-                if (chunkCount === thresholds[s] && s > currentStage) { advanceTo(s); break }
-              }
             } else if (data.type === 'done') {
               finalize(fullText); return
             } else if (data.type === 'error') {
-              addLocalLog({ agent: agentSequence[Math.min(currentStage, agentSequence.length - 1)], status: 'error', message: data.content || '分析失败', timestamp: new Date().toISOString() })
+              finalized = true
+              stageTimersRef.current.forEach(t => clearTimeout(t))
+              stageTimersRef.current = []
+              addLog({ agent: agentSequence[Math.min(currentStage, agentSequence.length - 1)], status: 'error', message: data.content || '分析失败', timestamp: new Date().toISOString() })
               setProcessing(false)
               return
             }
@@ -203,6 +237,8 @@ export default function EventAnalysis() {
       }
       finalize(fullText)
     } catch (err) {
+      stageTimersRef.current.forEach(t => clearTimeout(t))
+      stageTimersRef.current = []
       if (err instanceof Error && err.name !== 'AbortError') {
         console.error('[EventAnalysis] 分析失败:', err)
       }
@@ -215,11 +251,13 @@ export default function EventAnalysis() {
   const stopAnalysis = () => {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
+    stageTimersRef.current.forEach(t => clearTimeout(t))
+    stageTimersRef.current = []
     setProcessing(false)
     terminateRunningLogs()
   }
 
-  return (    <div className="relative flex flex-col bg-white overflow-hidden -m-8" style={{ height: 'calc(100vh - 64px)' }}>
+  return (    <div className="relative flex flex-col bg-white -m-8 min-h-full">
       {/* 顶部操作栏 */}
       <div className="px-6 py-3 border-b border-gray-200 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
@@ -267,16 +305,16 @@ export default function EventAnalysis() {
       </div>
 
       {/* 主内容区：左右两栏 */}
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-[960px] shrink-0 flex flex-col border-r border-gray-200 overflow-hidden">
+      <div className="flex">
+        <div className="w-[960px] shrink-0 flex flex-col border-r border-gray-200">
           <div className="h-[260px] shrink-0 border-b border-gray-100">
             <AgentFlowGraph logs={agentLogs} isProcessing={isProcessing} />
           </div>
-          <div className="flex-1 overflow-hidden p-3">
+          <div className="p-3">
             <ThinkingConsole logs={agentLogs} isProcessing={isProcessing} />
           </div>
         </div>
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1">
           <ResultPanel data={riskData} isProcessing={isProcessing} onSolutionUpdate={handleSolutionUpdate} />
         </div>
       </div>
@@ -287,6 +325,17 @@ export default function EventAnalysis() {
         onClose={() => setShowEventPicker(false)}
         onConfirm={(ids) => setSelectedEventIds(ids)}
         selectedIds={selectedEventIds}
+      />
+
+      {/* 报告预览与保存弹窗 */}
+      <ReportModal
+        visible={reportGenerating}
+        onClose={() => setReportGenerating(false)}
+        data={riskData}
+        logs={agentLogs}
+        analysisText={analysisText}
+        onSave={handleSaveReport}
+        saving={reportSaving}
       />
     </div>
   )

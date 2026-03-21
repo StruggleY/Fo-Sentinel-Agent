@@ -1,21 +1,15 @@
 import { useState, useRef, useEffect } from 'react'
-import {
-  Send,
-  MoreHorizontal,
-  Paperclip,
-  ChevronDown,
-  Layers,
-  Loader2,
-} from 'lucide-react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { ChevronDown, ChevronRight, Loader2, ListChecks, ThumbsUp, ThumbsDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { normalizeMarkdown } from '@/utils'
-import { chatService, skillService, ChatSession } from '@/services'
-import { Skill } from '@/services/skill'
-import { ChatMessage } from '@/types'
-import { cn } from '@/utils'
+import { normalizeMarkdown, cn } from '@/utils'
+import { chatService, ChatSession } from '@/services'
+import { ragevalService } from '@/services/rageval'
 import { useContextStore } from '@/stores/contextStore'
 import SessionList from './components/SessionList'
+import WelcomeScreen from './components/WelcomeScreen'
+import ChatInput from './components/ChatInput'
 
 type MessageRole = 'user' | 'assistant'
 
@@ -25,15 +19,13 @@ interface Message {
   content: string
   timestamp: Date
   isStreaming?: boolean
-  agentStatus?: string  // 路由/处理状态，独立于内容显示
-}
-
-type ChatMode = 'quick' | 'stream' | 'intent'
-
-const MODE_NAMES: Record<ChatMode, string> = {
-  quick: '快速',
-  stream: '流式',
-  intent: '多智能体',
+  agentStatus?: string
+  // Plan Agent 规划过程字段
+  planning?: string          // 中间步骤内容（plan_step 事件累积）
+  isPlanRunning?: boolean    // true = 规划执行中
+  planDone?: boolean         // true = 规划结束，最终答案已到达
+  planStartAt?: number       // 首个 plan_step 到达时的时间戳
+  planDuration?: number      // 规划用时（秒）
 }
 
 export default function Chat() {
@@ -42,177 +34,192 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [mode, setMode] = useState<ChatMode>('quick')
-  const [modeOpen, setModeOpen] = useState(false)
-  const [toolsOpen, setToolsOpen] = useState(false)
-  const [skills, setSkills] = useState<Skill[]>([])
-  const [skillsPanelOpen, setSkillsPanelOpen] = useState(false)
-  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
-  const [skillParams, setSkillParams] = useState<Record<string, string>>({})
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [uploadingFileName, setUploadingFileName] = useState('')
+  const [deepThinking, setDeepThinking] = useState(() => localStorage.getItem('chat_deep_thinking') === 'true')
+  const [webSearch, setWebSearch] = useState(() => localStorage.getItem('chat_web_search') === 'true')
+  // 记录每条消息的点赞/踩状态（key = message index）
+  const [votes, setVotes] = useState<Record<number, 1 | -1>>({})
 
+  const chatScrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const chatMessagesRef = useRef<HTMLDivElement>(null)
   const streamingContentRef = useRef('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const toolsBtnRef = useRef<HTMLButtonElement>(null)
-  const modeBtnRef = useRef<HTMLButtonElement>(null)
-  const toolsMenuRef = useRef<HTMLDivElement>(null)
-  const modeDropdownRef = useRef<HTMLDivElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  // 记录当前"正在 loading"的消息 ID，防止旧 stream 的 onDone 错误清除新 stream 的 loading 状态
+  const loadingStreamRef = useRef<string | null>(null)
 
-  const { currentEventId, currentEventTitle, setContext } = useContextStore()
+  const { currentEventId, currentEventTitle } = useContextStore()
+  const navigate = useNavigate()
+  const location = useLocation()
 
-  // 初始化会话列表
+  // ── 组件卸载时不 abort（让 stream 在后台跑完，onDone 会写入 localStorage）
   useEffect(() => {
-    const loadedSessions = chatService.listSessions()
-    if (loadedSessions.length === 0) {
-      const newSession = chatService.createSession()
-      setSessions([newSession])
-      setCurrentSessionId(newSession.id)
+    return () => { /* no abort: background stream saves result on completion */ }
+  }, [])
+
+  // ── 初始化 ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const loaded = chatService.listSessions()
+    if (loaded.length === 0) {
+      const s = chatService.createSession()
+      setSessions([s])
+      setCurrentSessionId(s.id)
     } else {
-      setSessions(loadedSessions)
-      const sessionId = chatService.getSessionId()
-      setCurrentSessionId(sessionId)
-      loadMessages(sessionId)
+      setSessions(loaded)
+      const sid = chatService.getSessionId()
+      setCurrentSessionId(sid)
+      loadMessages(sid)
     }
   }, [])
 
   useEffect(() => {
-    skillService.list().then(setSkills).catch(() => {})
-  }, [])
-
-  // 加载会话消息
-  const loadMessages = (sessionId: string) => {
-    const key = `chat_messages_${sessionId}`
-    const data = localStorage.getItem(key)
-    if (data) {
-      setMessages(JSON.parse(data))
-    } else {
-      setMessages([])
-    }
-  }
-
-  // 保存会话消息
-  const saveMessages = (sessionId: string, msgs: Message[]) => {
-    const key = `chat_messages_${sessionId}`
-    localStorage.setItem(key, JSON.stringify(msgs))
-  }
-
-  // 切换会话
-  const handleSelectSession = (sessionId: string) => {
-    saveMessages(currentSessionId, messages)
-    setCurrentSessionId(sessionId)
-    chatService.switchSession(sessionId)
-    loadMessages(sessionId)
-  }
-
-  // 新建会话
-  const handleNewSession = () => {
-    // 如果当前会话是空的，不创建新会话
-    if (currentSessionId && messages.length === 0) {
-      return
-    }
-    saveMessages(currentSessionId, messages)
-    const newSession = chatService.createSession()
-    setSessions([newSession, ...sessions])
-    setCurrentSessionId(newSession.id)
-    setMessages([])
-  }
-
-  // 删除会话
-  const handleDeleteSession = (sessionId: string) => {
-    chatService.deleteSession(sessionId)
-    const key = `chat_messages_${sessionId}`
-    localStorage.removeItem(key)
-    const updatedSessions = sessions.filter(s => s.id !== sessionId)
-    setSessions(updatedSessions)
-    if (sessionId === currentSessionId) {
-      if (updatedSessions.length > 0) {
-        handleSelectSession(updatedSessions[0].id)
-      } else {
-        setCurrentSessionId('')
-        setMessages([])
-      }
-    }
-  }
-
-  useEffect(() => {
-    if (chatMessagesRef.current) {
-      chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
     }
   }, [messages])
 
-  // 自动保存消息
+  // 从事件列表跳转：直接发送消息
+  useEffect(() => {
+    const state = location.state as { query?: string } | null
+    if (!state?.query) return
+    navigate(location.pathname, { replace: true, state: null })
+    handleSend(state.query)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
+
+  // ── 会话管理 ─────────────────────────────────────────────────────────────
+  const loadMessages = (sid: string) => {
+    const raw = localStorage.getItem(`chat_messages_${sid}`)
+    setMessages(raw ? JSON.parse(raw) : [])
+    // 恢复输入框草稿
+    setInput(localStorage.getItem(`chat_draft_${sid}`) ?? '')
+    // 恢复点赞/踩状态
+    const votesRaw = localStorage.getItem(`chat_votes_${sid}`)
+    setVotes(votesRaw ? JSON.parse(votesRaw) : {})
+  }
+
+  const saveMessages = (sid: string, msgs: Message[]) => {
+    localStorage.setItem(`chat_messages_${sid}`, JSON.stringify(msgs))
+  }
+
   useEffect(() => {
     if (currentSessionId && messages.length > 0) {
       saveMessages(currentSessionId, messages)
     }
   }, [messages, currentSessionId])
 
+  // 持久化深度思考 / 联网搜索开关（跨会话、跨刷新保持用户选择）
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      const inTools = toolsBtnRef.current?.contains(target) || toolsMenuRef.current?.contains(target)
-      const inMode = modeBtnRef.current?.contains(target) || modeDropdownRef.current?.contains(target)
-      if (!inTools) setToolsOpen(false)
-      if (!inMode) setModeOpen(false)
+    localStorage.setItem('chat_deep_thinking', String(deepThinking))
+  }, [deepThinking])
+
+  useEffect(() => {
+    localStorage.setItem('chat_web_search', String(webSearch))
+  }, [webSearch])
+
+  // 持久化输入框草稿
+  useEffect(() => {
+    if (!currentSessionId) return
+    if (input) {
+      localStorage.setItem(`chat_draft_${currentSessionId}`, input)
+    } else {
+      localStorage.removeItem(`chat_draft_${currentSessionId}`)
     }
-    document.addEventListener('click', handleClick)
-    return () => document.removeEventListener('click', handleClick)
-  }, [])
+  }, [input, currentSessionId])
 
-  const generateId = () => Math.random().toString(36).substring(2, 15)
+  // 持久化点赞/踩状态
+  useEffect(() => {
+    if (!currentSessionId) return
+    if (Object.keys(votes).length > 0) {
+      localStorage.setItem(`chat_votes_${currentSessionId}`, JSON.stringify(votes))
+    }
+  }, [votes, currentSessionId])
 
+  const handleSelectSession = (sid: string) => {
+    // 将进行中的流式消息标为完成后保存，防止切换回来时看到"卡住"的 streaming 状态
+    const finalMessages = messages.map(m =>
+      m.isStreaming ? { ...m, isStreaming: false, agentStatus: undefined, isPlanRunning: false } : m
+    )
+    saveMessages(currentSessionId, finalMessages)
+    loadingStreamRef.current = null  // 旧 stream 的 onDone 不再清除 loading
+    setCurrentSessionId(sid)
+    setIsLoading(false)
+    chatService.switchSession(sid)
+    loadMessages(sid)
+  }
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return
+  const handleNewSession = () => {
+    if (currentSessionId && messages.length === 0) return
+    const finalMessages = messages.map(m =>
+      m.isStreaming ? { ...m, isStreaming: false, agentStatus: undefined, isPlanRunning: false } : m
+    )
+    saveMessages(currentSessionId, finalMessages)
+    loadingStreamRef.current = null
+    const s = chatService.createSession()
+    setSessions([s, ...sessions])
+    setCurrentSessionId(s.id)
+    setMessages([])
+    setInput('')
+    setVotes({})
+    setIsLoading(false)
+    setDeepThinking(false)
+    setWebSearch(false)
+  }
 
-    // 如果没有当前会话，先创建一个
-    let sessionId = currentSessionId
-    if (!sessionId) {
-      const newSession = chatService.createSession()
-      setSessions([newSession, ...sessions])
-      setCurrentSessionId(newSession.id)
-      sessionId = newSession.id
+  const handleDeleteSession = (sid: string) => {
+    chatService.deleteSession(sid)
+    localStorage.removeItem(`chat_messages_${sid}`)
+    localStorage.removeItem(`chat_draft_${sid}`)
+    localStorage.removeItem(`chat_votes_${sid}`)
+    const updated = sessions.filter((s) => s.id !== sid)
+    setSessions(updated)
+    if (sid === currentSessionId) {
+      if (updated.length > 0) handleSelectSession(updated[0].id)
+      else { setCurrentSessionId(''); setMessages([]) }
+    }
+  }
+
+  // ── 发送消息（overrideText 来自技能卡片或事件跳转） ──────────────────────────
+  const handleSend = async (overrideText?: string) => {
+    const rawContent = overrideText !== undefined ? overrideText : input
+    if (!rawContent.trim() || isLoading) return
+
+    let sid = currentSessionId
+    if (!sid) {
+      const s = chatService.createSession()
+      setSessions([s, ...sessions])
+      setCurrentSessionId(s.id)
+      sid = s.id
     }
 
-    let messageContent = input.trim()
+    let messageContent = rawContent.trim()
     if (currentEventId && currentEventTitle) {
       messageContent = `[当前上下文: 事件#${currentEventId} "${currentEventTitle}"]\n${messageContent}`
     }
 
     const userMessage: Message = {
-      id: generateId(),
+      id: genId(),
       role: 'user',
-      content: input.trim(),
+      content: rawContent.trim(),
       timestamp: new Date(),
     }
-    const newMessages = [...messages, userMessage]
-    setMessages(newMessages)
-    setInput('')
+    setMessages((prev) => [...prev, userMessage])
+    if (overrideText === undefined) setInput('')
     setIsLoading(true)
 
-    // 更新会话标题（首条消息）
+    // 更新会话标题
     if (messages.length === 0) {
-      const title = input.trim().slice(0, 30) + (input.trim().length > 30 ? '...' : '')
-      chatService.updateSession(sessionId, { title })
-      setSessions(prevSessions => prevSessions.map(s => s.id === sessionId ? { ...s, title } : s))
+      const title = rawContent.trim().slice(0, 30) + (rawContent.trim().length > 30 ? '...' : '')
+      chatService.updateSession(sid, { title })
+      setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title } : s)))
     }
-
-    // 更新会话时间和消息数
-    chatService.updateSession(sessionId, {
-      lastMessageAt: Date.now(),
-      messageCount: messages.length + 1,
-    })
-    setSessions(prevSessions => prevSessions.map(s =>
-      s.id === sessionId
-        ? { ...s, lastMessageAt: Date.now(), messageCount: messages.length + 1 }
-        : s
-    ))
+    chatService.updateSession(sid, { lastMessageAt: Date.now(), messageCount: messages.length + 1 })
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sid ? { ...s, lastMessageAt: Date.now(), messageCount: messages.length + 1 } : s
+      )
+    )
 
     const assistantMessage: Message = {
-      id: generateId(),
+      id: genId(),
       role: 'assistant',
       content: '',
       timestamp: new Date(),
@@ -220,13 +227,17 @@ export default function Chat() {
     }
     setMessages((prev) => [...prev, assistantMessage])
 
-    const history: ChatMessage[] = messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }))
-
     streamingContentRef.current = ''
-    let updateTimer: ReturnType<typeof setTimeout> | null = null
+
+    // 中止上一个请求（如有），新建控制器
+    abortControllerRef.current?.abort()
+    const abortCtrl = new AbortController()
+    abortControllerRef.current = abortCtrl
+
+    // 捕获此次 stream 归属（用于 onDone 写入正确的 localStorage key）
+    const capturedSessionId = sid
+    const capturedMessageId = assistantMessage.id
+    loadingStreamRef.current = capturedMessageId
 
     const flushContent = () => {
       setMessages((prev) =>
@@ -237,228 +248,140 @@ export default function Chat() {
     }
 
     try {
-      if (mode === 'quick') {
-        const res = await chatService.chat({ message: messageContent, history })
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMessage.id
-              ? { ...m, content: res.reply, isStreaming: false }
-              : m
-          )
-        )
-      } else if (mode === 'intent') {
-        chatService.supervisorChat(
-          messageContent,
-          (agent, content) => {
-            if (agent === 'status') {
-              // 状态消息：更新 agentStatus 字段，不混入内容
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMessage.id ? { ...m, agentStatus: content } : m
-                )
-              )
-            } else {
-              // 内容消息：累积到 streamingContent
-              streamingContentRef.current += content
-              flushContent()
-            }
-          },
-          () => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessage.id ? { ...m, isStreaming: false } : m
-              )
-            )
-            setIsLoading(false)
-          }
-        )
-      } else {
-        await chatService.chatStream(
-          { message: messageContent, history },
-          (content) => {
-            streamingContentRef.current += content
-            if (!updateTimer) {
-              updateTimer = setTimeout(() => {
-                flushContent()
-                updateTimer = null
-              }, 50)
-            }
-          },
-          () => {
-            if (updateTimer) clearTimeout(updateTimer)
-            flushContent()
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessage.id ? { ...m, isStreaming: false } : m
-              )
-            )
-            setIsLoading(false)
-          },
-          (error) => {
+      // 始终走多智能体（意图识别路由），deepThinking 为深度思考模式
+      chatService.multiAgentChat(
+        messageContent,
+        deepThinking,
+        webSearch,
+        (agent, content) => {
+          if (agent === 'plan_step') {
+            // Plan Agent 中间步骤：每次 onStep 推送的是完整的一段文字（非增量），
+            // 用换行追加到 planning 字段，展示在规划过程折叠块中
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMessage.id
-                  ? { ...m, content: `错误: ${error.message}`, isStreaming: false }
+                  ? {
+                      ...m,
+                      planning: (m.planning ? m.planning + '\n\n' : '') + content,
+                      isPlanRunning: true,
+                      planStartAt: m.planStartAt ?? Date.now(),
+                    }
                   : m
               )
             )
-            setIsLoading(false)
-          }
-        )
-      }
-      if (mode !== 'intent' && mode !== 'stream') setIsLoading(false)
-    } catch {
-      setIsLoading(false)
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || isLoading) return
-    const allowed = ['.txt', '.md', '.markdown']
-    const name = file.name.toLowerCase()
-    if (!allowed.some((ext) => name.endsWith(ext))) return
-
-    setIsLoading(true)
-    setUploadingFileName(file.name)
-    setUploadProgress(0)
-
-    try {
-      await chatService.uploadFile(file, (progress) => {
-        setUploadProgress(progress)
-      })
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: generateId(),
-          role: 'assistant',
-          content: `${file.name} 上传到知识库成功`,
-          timestamp: new Date(),
-        },
-      ])
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: generateId(),
-          role: 'assistant',
-          content: '文件上传失败',
-          timestamp: new Date(),
-        },
-      ])
-    } finally {
-      setIsLoading(false)
-      setUploadingFileName('')
-      setUploadProgress(0)
-    }
-    e.target.value = ''
-  }
-
-  const handleSkillExecute = () => {
-    if (!selectedSkill || isLoading) return
-
-    // 如果没有当前会话，先创建一个
-    let sessionId = currentSessionId
-    if (!sessionId) {
-      const newSession = chatService.createSession()
-      setSessions([newSession, ...sessions])
-      setCurrentSessionId(newSession.id)
-      sessionId = newSession.id
-    }
-
-    setIsLoading(true)
-
-    // 创建用户消息（只显示参数值，更自然）
-    const paramsText = Object.values(skillParams).filter(v => v).join('、')
-    const userMessage: Message = {
-      id: generateId(),
-      role: 'user',
-      content: paramsText || selectedSkill.name,
-      timestamp: new Date(),
-    }
-
-    // 创建助手消息
-    const assistantMessage: Message = {
-      id: generateId(),
-      role: 'assistant',
-      content: '',
-      timestamp: new Date(),
-      isStreaming: true,
-    }
-
-    setMessages((prev) => [...prev, userMessage, assistantMessage])
-
-    // 更新会话标题（首条消息）
-    if (messages.length === 0) {
-      const title = `${selectedSkill.name}${paramsText ? `: ${paramsText.slice(0, 20)}` : ''}`
-      chatService.updateSession(sessionId, { title })
-      setSessions(prevSessions => prevSessions.map(s => s.id === sessionId ? { ...s, title } : s))
-    }
-
-    // 更新会话时间和消息数
-    chatService.updateSession(sessionId, {
-      lastMessageAt: Date.now(),
-      messageCount: messages.length + 2,
-    })
-    setSessions(prevSessions => prevSessions.map(s =>
-      s.id === sessionId
-        ? { ...s, lastMessageAt: Date.now(), messageCount: messages.length + 2 }
-        : s
-    ))
-
-    let content = ''
-    let updateTimer: ReturnType<typeof setTimeout> | null = null
-
-    const flushContent = () => {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMessage.id ? { ...m, content } : m
-        )
-      )
-    }
-
-    skillService.execute(
-      selectedSkill.id,
-      skillParams,
-      (type, text) => {
-        if (type === 'step') {
-          content += `[${text}]\n`
-        } else {
-          content = text  // 收到结果时清空进度提示
-        }
-        if (!updateTimer) {
-          updateTimer = setTimeout(() => {
+          } else if (agent === 'status') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessage.id ? { ...m, agentStatus: content } : m
+              )
+            )
+          } else if (agent === 'meta') {
+            try {
+              const meta = JSON.parse(content) as Record<string, string>
+              if (meta.sessionId && !meta.deepThinking) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMessage.id
+                      ? { ...m, agentStatus: '多智能体处理中...' }
+                      : m
+                  )
+                )
+              }
+            } catch { /* ignore */ }
+          } else {
+            // 内容到达时，结束规划阶段（如有），计算用时
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantMessage.id) return m
+                const planDuration = m.planStartAt && m.isPlanRunning
+                  ? Math.round((Date.now() - m.planStartAt) / 1000)
+                  : undefined
+                return {
+                  ...m,
+                  isPlanRunning: false,
+                  planDone: m.isPlanRunning ? true : m.planDone,
+                  planDuration: m.planDuration ?? planDuration,
+                }
+              })
+            )
+            streamingContentRef.current += content
             flushContent()
-            updateTimer = null
-          }, 50)
-        }
-      },
-      () => {
-        if (updateTimer) clearTimeout(updateTimer)
-        flushContent()
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMessage.id ? { ...m, isStreaming: false } : m
+          }
+        },
+        () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === capturedMessageId
+                ? {
+                    ...m,
+                    isStreaming: false,
+                    isPlanRunning: false,
+                    planDone: (m.planning?.length ?? 0) > 0 ? true : m.planDone,
+                    agentStatus: undefined,
+                  }
+                : m
+            )
           )
-        )
-        setIsLoading(false)
-        setSelectedSkill(null)
-        setSkillParams({})
-      }
-    )
+          // 只有本次 stream 仍是"活跃 stream"时才清除 loading，
+          // 防止后台旧 stream 完成时误清除新 session 的 loading 状态
+          if (loadingStreamRef.current === capturedMessageId) {
+            setIsLoading(false)
+            loadingStreamRef.current = null
+          }
+          // 直接写入 localStorage，即使组件已卸载（页面跳转后回来仍能看到完整回复）
+          try {
+            const raw = localStorage.getItem(`chat_messages_${capturedSessionId}`)
+            if (raw) {
+              const msgs = JSON.parse(raw) as Message[]
+              const finalContent = streamingContentRef.current
+              const updated = msgs.map(m =>
+                m.id === capturedMessageId
+                  ? { ...m, content: finalContent, isStreaming: false, isPlanRunning: false, agentStatus: undefined }
+                  : m
+              )
+              localStorage.setItem(`chat_messages_${capturedSessionId}`, JSON.stringify(updated))
+            }
+          } catch { /* ignore */ }
+        },
+        abortCtrl.signal
+      )
+    } catch {
+      setIsLoading(false)
+    }
   }
 
-  const centered = messages.length === 0
+  // ── 文件上传成功回调 ──────────────────────────────────────────────────────
+  const handleFileUploadSuccess = () => {
+    setMessages((prev) => [
+      ...prev,
+      { id: genId(), role: 'assistant', content: '文件已上传到知识库，正在异步索引…', timestamp: new Date() },
+    ])
+  }
 
+  // ── 消息反馈 ──────────────────────────────────────────────────────────────
+  const submitFeedback = async (messageIndex: number, vote: 1 | -1) => {
+    // toggle：再次点击同一个按钮 → 取消反馈
+    const current = votes[messageIndex]
+    const newVote = current === vote ? 0 : vote
+    setVotes(prev => {
+      const next = { ...prev }
+      if (newVote === 0) delete next[messageIndex]
+      else next[messageIndex] = newVote as 1 | -1
+      return next
+    })
+    try {
+      await ragevalService.submitFeedback(currentSessionId, messageIndex, newVote as 1 | -1 | 0)
+    } catch {
+      // 静默失败，不打扰用户
+    }
+  }
+
+  const genId = () => Math.random().toString(36).substring(2, 15)
+
+  // ── 渲染 ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-[calc(100vh-4rem)] -m-8">
+    <div className="absolute inset-0 flex overflow-hidden">
+      {/* 左侧会话列表 */}
       <SessionList
         sessions={sessions}
         currentSessionId={currentSessionId}
@@ -466,290 +389,292 @@ export default function Chat() {
         onNewSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
       />
-      <div className="flex flex-col flex-1 min-h-0 bg-white">
-        <div className={cn('chat-container view-panel flex-1 flex flex-col', centered && 'centered')}>
-          <div className="welcome-greeting">
-          <p>你好！我是安全事件智能研判助手</p>
-        </div>
 
-        <div className="chat-messages" ref={chatMessagesRef}>
-          {messages.map((m, i) => (
-            <div
-              key={m.id}
-              className={cn(
-                'message',
-                m.role,
-                m.role === 'assistant' && i === messages.length - 1 && m.isStreaming && 'streaming'
-              )}
-            >
-              {m.role === 'assistant' && (
-                <div className="message-avatar">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
-                      fill="white"
+      {/* 右侧主区域 */}
+      <div className="relative flex flex-1 flex-col min-h-0 overflow-hidden">
+        {/* 渐变背景层（欢迎屏与对话区共用） */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#F8FAFC] via-white to-[#EFF6FF]" />
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.35]"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, rgba(59,130,246,0.07) 1px, transparent 1px), linear-gradient(to bottom, rgba(59,130,246,0.07) 1px, transparent 1px)',
+            backgroundSize: '40px 40px',
+          }}
+        />
+        <div className="pointer-events-none absolute -top-32 right-[-40px] h-72 w-72 rounded-full bg-[#BFDBFE]/50 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-36 left-[-80px] h-80 w-80 rounded-full bg-[#FDE68A]/30 blur-3xl" />
+
+        {messages.length === 0 ? (
+          /* ── 欢迎屏：标题 + 居中输入框 + 预设卡片 ── */
+          <div className="relative flex-1 min-h-0 overflow-y-auto chat-sidebar-scroll">
+            <WelcomeScreen
+              onPresetSelect={(text) => setInput(text)}
+              isLoading={isLoading}
+              inputSlot={
+                  <div className="relative w-full space-y-1">
+                    <ChatInput
+                      value={input}
+                      onChange={setInput}
+                      onSend={handleSend}
+                      isLoading={isLoading}
+                      onFileUpload={handleFileUploadSuccess}
+                      deepThinking={deepThinking}
+                      onDeepThinkingChange={setDeepThinking}
+                      webSearch={webSearch}
+                      onWebSearchChange={setWebSearch}
                     />
-                  </svg>
-                </div>
-              )}
-              <div className="message-content-wrapper">
-                <div className="message-content">
-                  {m.role === 'assistant' ? (
-                    <>
-                      {m.agentStatus && (
-                        <div className="text-xs text-gray-400 mb-1 font-normal opacity-75">
-                          {m.agentStatus}
-                        </div>
-                      )}
-                      {m.content ? (
-                        i === messages.length - 1 && m.isStreaming ? (
-                          <>
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {normalizeMarkdown(m.content)}
-                            </ReactMarkdown>
-                            <span className="inline-block w-1.5 h-4 bg-gray-500 animate-pulse ml-0.5" />
-                          </>
-                        ) : (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {normalizeMarkdown(m.content)}
-                          </ReactMarkdown>
-                        )
-                      ) : (
-                        <span />
-                      )}
-                    </>
-                  ) : (
-                    m.content
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-
-        <div className="chat-input-container">
-          {currentEventId && (
-            <div className="event-context-bar input-group-wrapper">
-              <span className="event-context-label">当前事件：</span>
-              <span className="event-context-title">
-                {currentEventTitle || `#${currentEventId}`}
-              </span>
-              <button
-                type="button"
-                className="event-context-clear"
-                onClick={() => setContext('', undefined, undefined)}
-              >
-                清除
-              </button>
-            </div>
-          )}
-
-          {selectedSkill && (
-            <div className="input-group-wrapper mb-2 p-3 bg-gray-50 rounded-xl border border-gray-200">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">{selectedSkill.name}</span>
-                <button
-                  onClick={() => setSelectedSkill(null)}
-                  className="text-gray-500 hover:text-gray-700 text-sm"
-                >
-                  关闭
-                </button>
-              </div>
-              <div className="flex gap-2 items-end">
-                {selectedSkill.params.map((p) => (
-                  <input
-                    key={p.name}
-                    type={p.type === 'number' ? 'number' : 'text'}
-                    placeholder={p.description}
-                    value={skillParams[p.name] || ''}
-                    onChange={(e) =>
-                      setSkillParams({ ...skillParams, [p.name]: e.target.value })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !isLoading) {
-                        e.preventDefault()
-                        handleSkillExecute()
-                      }
-                    }}
-                    className="input flex-1 text-sm"
+                  </div>
+              }
+            />
+          </div>
+        ) : (
+          /* ── 对话区 ── */
+          <>
+            <div
+              ref={chatScrollRef}
+              className="relative flex-1 min-h-0 overflow-y-auto chat-sidebar-scroll"
+            >
+              <div className="max-w-[760px] ml-[max(32px,calc(50vw-660px))] px-6 py-8 space-y-2">
+                {messages.map((m, i) => (
+                  <MessageBubble
+                    key={m.id}
+                    message={m}
+                    isLast={i === messages.length - 1}
+                    messageIndex={i}
+                    vote={votes[i]}
+                    onVote={submitFeedback}
                   />
                 ))}
-                <button
-                  onClick={handleSkillExecute}
-                  disabled={isLoading}
-                  className="btn-primary btn-sm"
-                >
-                  {isLoading ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    '执行'
-                  )}
-                </button>
+                <div ref={messagesEndRef} />
               </div>
             </div>
-          )}
 
-          {uploadingFileName && (
-            <div className="input-group-wrapper mb-2 p-3 bg-blue-50 rounded-xl border border-blue-200">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">上传文件：{uploadingFileName}</span>
-                <span className="text-sm font-semibold text-blue-600">{uploadProgress}%</span>
-              </div>
-              <div className="progress">
-                <div className="progress-bar bg-blue-600" style={{ width: `${uploadProgress}%` }} />
-              </div>
-            </div>
-          )}
-
-          <div className="input-group-wrapper">
-            <div className="input-wrapper">
-              <input
-                type="text"
-                className="message-input"
-                placeholder="问问安全事件智能研判助手"
-                maxLength={1000}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isLoading}
-              />
-              <div className="input-bottom-bar">
-                <div className={cn('tools-btn-wrapper', toolsOpen && 'active')}>
-                  <button
-                    ref={toolsBtnRef}
-                    type="button"
-                    className={cn('tools-btn', toolsOpen && 'active')}
-                    title="更多选项"
-                    onClick={() => setToolsOpen(!toolsOpen)}
-                  >
-                    <MoreHorizontal className="tools-icon w-5 h-5" />
-                  </button>
-                  {toolsOpen && (
-                    <div
-                      ref={toolsMenuRef}
-                      className="tools-menu"
-                      style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: 0 }}
-                    >
-                      <div
-                        className="tools-menu-item"
-                        onClick={() => {
-                          setSkillsPanelOpen(true)
-                          setToolsOpen(false)
-                        }}
-                      >
-                        <Layers className="w-5 h-5 flex-shrink-0 text-gray-600" />
-                        <span>Skills</span>
-                      </div>
-                      <div
-                        className="tools-menu-item"
-                        onClick={() => {
-                          fileInputRef.current?.click()
-                          setToolsOpen(false)
-                        }}
-                      >
-                        <Paperclip className="w-5 h-5 flex-shrink-0 text-gray-600" />
-                        <span>上传文件</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".txt,.md,.markdown"
-                  className="hidden"
-                  onChange={handleUpload}
-                />
-                <div className="right-actions">
-                  <div className={cn('mode-selector-wrapper', modeOpen && 'active')}>
-                    <button
-                      ref={modeBtnRef}
-                      type="button"
-                      className={cn('mode-selector-btn', modeOpen && 'active')}
-                      onClick={() => setModeOpen(!modeOpen)}
-                    >
-                      <span>{MODE_NAMES[mode]}</span>
-                      <ChevronDown className="dropdown-arrow w-4 h-4" />
-                    </button>
-                    {modeOpen && (
-                      <div
-                        ref={modeDropdownRef}
-                        className="mode-dropdown"
-                        style={{ position: 'absolute', bottom: 'calc(100% + 8px)', right: 0 }}
-                      >
-                        {(['quick', 'stream', 'intent'] as const).map((m) => (
-                          <div
-                            key={m}
-                            className={cn('dropdown-item', mode === m && 'active')}
-                            onClick={() => {
-                              setMode(m)
-                              setModeOpen(false)
-                            }}
-                          >
-                            <span>{MODE_NAMES[m]}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary rounded-full w-9 h-9 p-0"
-                    title="发送"
-                    disabled={!input.trim() || isLoading}
-                    onClick={handleSend}
-                  >
-                    {isLoading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Send className="w-5 h-5" />
-                    )}
-                  </button>
+            {/* 底部输入区 */}
+            <div className="relative border-t border-white/60 bg-white/60 backdrop-blur-sm px-4 py-4">
+              <div className="max-w-[760px] ml-[max(32px,calc(50vw-660px))] space-y-2">
+                {/* ChatInput */}
+                <div className="relative">
+                  <ChatInput
+                    value={input}
+                    onChange={setInput}
+                    onSend={handleSend}
+                    isLoading={isLoading}
+                    onFileUpload={handleFileUploadSuccess}
+                    deepThinking={deepThinking}
+                    onDeepThinkingChange={setDeepThinking}
+                    webSearch={webSearch}
+                    onWebSearchChange={setWebSearch}
+                  />
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
+
       </div>
     </div>
+  )
+}
 
-    {skillsPanelOpen && (
-        <div className="skills-modal-overlay">
-          <div className="skills-modal">
-            <div className="skills-modal-header">
-              <h3 className="skills-modal-title">Skills</h3>
-              <button
-                onClick={() => setSkillsPanelOpen(false)}
-                className="p-2 rounded-lg text-gray-500 hover:bg-gray-200 transition-colors"
-              >
-                ✕
-              </button>
+// ── MessageBubble ─────────────────────────────────────────────────────────────
+
+interface MessageBubbleProps {
+  message: Message
+  isLast: boolean
+  messageIndex: number
+  vote?: 1 | -1
+  onVote: (messageIndex: number, vote: 1 | -1) => void
+}
+
+function MessageBubble({ message, isLast, messageIndex, vote, onVote }: MessageBubbleProps) {
+  if (message.role === 'user') {
+    return (
+      <div className="flex justify-end mb-4">
+        <div
+          className="max-w-[72%] rounded-3xl rounded-br-lg px-5 py-3 text-sm leading-relaxed text-white"
+          style={{
+            background: 'linear-gradient(135deg, #3B82F6 0%, #6366F1 100%)',
+            boxShadow: '0 2px 12px rgba(59,130,246,0.25)',
+          }}
+        >
+          {message.content}
+        </div>
+      </div>
+    )
+  }
+
+  // assistant
+  return (
+    <div className="flex items-start gap-3 mb-4">
+      {/* AI 头像 */}
+      <div
+        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white mt-1"
+        style={{ background: 'linear-gradient(135deg, #3B82F6 0%, #6366F1 100%)' }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="white" />
+        </svg>
+      </div>
+
+      <div className="min-w-0 flex-1 space-y-2">
+        {/* Agent 状态 */}
+        {message.agentStatus && (
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-[#BFDBFE] bg-[#EFF6FF] px-3 py-1 text-xs text-[#2563EB]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#3B82F6] animate-pulse" />
+            {message.agentStatus}
+          </div>
+        )}
+
+        {/* Plan Agent 规划过程区块 */}
+        {(message.planning !== undefined) && (
+          <PlanningBlock
+            planning={message.planning || ''}
+            isPlanRunning={!!message.isPlanRunning}
+            isDone={!!message.planDone}
+            planDuration={message.planDuration}
+          />
+        )}
+
+        {/* 主内容 */}
+        {message.content ? (
+          <div className="rounded-3xl rounded-tl-lg border border-[#F0F0F0] bg-white px-5 py-3.5 shadow-[0_1px_6px_rgba(0,0,0,0.05)]">
+            <div className="chat-markdown text-sm leading-relaxed text-[#1F2937]">
+              {isLast && message.isStreaming ? (
+                <>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {normalizeMarkdown(message.content)}
+                  </ReactMarkdown>
+                  <span className="inline-block h-4 w-1.5 animate-pulse bg-[#3B82F6] ml-0.5 rounded-sm align-text-bottom" />
+                </>
+              ) : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {normalizeMarkdown(message.content)}
+                </ReactMarkdown>
+              )}
             </div>
-            <div className="skills-modal-body">
-              <div className="grid grid-cols-2 gap-3">
-                {skills.map((skill) => (
-                  <div
-                    key={skill.id}
-                    onClick={() => {
-                      setSelectedSkill(skill)
-                      setSkillParams({})
-                      setSkillsPanelOpen(false)
-                    }}
+            {/* 点赞/踩按钮（流式完成后显示） */}
+            {!message.isStreaming && (
+              <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-50">
+                <div className="relative group/like">
+                  <button
+                    onClick={() => onVote(messageIndex, 1)}
                     className={cn(
-                      'skill-card',
-                      selectedSkill?.id === skill.id && 'selected'
+                      'p-1 rounded hover:bg-emerald-50 transition-colors',
+                      vote === 1 ? 'text-emerald-600' : 'text-gray-300 hover:text-emerald-500',
                     )}
                   >
-                    <div className="skill-card-name">{skill.name}</div>
-                    <div className="skill-card-desc">{skill.description}</div>
+                    <ThumbsUp className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1F2937] px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover/like:opacity-100">
+                    有帮助
+                    <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1F2937]" />
                   </div>
-                ))}
+                </div>
+                <div className="relative group/dislike">
+                  <button
+                    onClick={() => onVote(messageIndex, -1)}
+                    className={cn(
+                      'p-1 rounded hover:bg-red-50 transition-colors',
+                      vote === -1 ? 'text-red-500' : 'text-gray-300 hover:text-red-400',
+                    )}
+                  >
+                    <ThumbsDown className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1F2937] px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover/dislike:opacity-100">
+                    没帮助
+                    <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1F2937]" />
+                  </div>
+                </div>
               </div>
+            )}
+          </div>
+        ) : (
+          isLast && message.isStreaming && !message.isPlanRunning && (
+            <div className="inline-flex items-center gap-1.5 rounded-3xl rounded-tl-lg border border-[#F0F0F0] bg-white px-5 py-4 shadow-[0_1px_6px_rgba(0,0,0,0.05)]">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="h-2 w-2 rounded-full bg-[#CBD5E1]"
+                  style={{ animation: `chat-bounce 1.2s ease-in-out ${i * 0.2}s infinite` }}
+                />
+              ))}
             </div>
+          )
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── PlanningBlock ─────────────────────────────────────────────────────────────
+
+interface PlanningBlockProps {
+  planning: string
+  isPlanRunning: boolean
+  isDone: boolean
+  planDuration?: number
+}
+
+function PlanningBlock({ planning, isPlanRunning, isDone, planDuration }: PlanningBlockProps) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (isPlanRunning) {
+    return (
+      <div className="rounded-2xl border border-[#A7F3D0] bg-[#ECFDF5] p-4">
+        <div className="flex items-center gap-2 text-[#059669]">
+          <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+          <span className="text-sm font-medium">规划执行中...</span>
+        </div>
+        {planning && (
+          <div className="mt-3 flex items-start gap-2 text-sm text-[#065F46]">
+            <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#059669]" />
+            <div className="chat-markdown leading-relaxed min-w-0 flex-1">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {normalizeMarkdown(planning)}
+              </ReactMarkdown>
+              <span className="ml-1 inline-block h-4 w-1.5 animate-pulse bg-[#059669] align-middle rounded-sm" />
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (!isDone || !planning) return null
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#A7F3D0] bg-[#ECFDF5]">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-[#A7F3D0]/30"
+      >
+        <div className="flex flex-1 items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#A7F3D0]">
+            <ListChecks className="h-4 w-4 text-[#059669]" />
+          </div>
+          <span className="text-sm font-medium text-[#059669]">规划执行过程</span>
+          <span className="rounded-full bg-[#A7F3D0] px-2 py-0.5 text-xs text-[#065F46]">
+            {planDuration !== undefined ? `执行了 ${planDuration} 秒` : '已完成'}
+          </span>
+        </div>
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-[#059669]" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-[#059669]" />
+        )}
+      </button>
+      {expanded && (
+        <div className="border-t border-[#A7F3D0] px-4 pb-4">
+          <div className="mt-3 chat-markdown text-sm leading-relaxed text-[#065F46]">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {normalizeMarkdown(planning)}
+            </ReactMarkdown>
           </div>
         </div>
       )}
     </div>
   )
 }
+

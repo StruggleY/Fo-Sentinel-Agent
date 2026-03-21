@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { CalendarDays, Clock, Crosshair, ChevronDown } from 'lucide-react'
+import { Clock, Crosshair, ChevronDown } from 'lucide-react'
 import { cn } from '@/utils'
 
-export type AnalysisMode = 'latest' | 'today' | 'specific'
+export type AnalysisMode = 'latest' | 'specific'
 
 interface Props {
   value: AnalysisMode
@@ -12,7 +12,6 @@ interface Props {
 }
 
 const options = [
-  { value: 'today' as const, label: '今日事件', icon: CalendarDays, desc: '今天产生的事件' },
   { value: 'latest' as const, label: '最近10条', icon: Clock, desc: '按时间倒序' },
   { value: 'specific' as const, label: '指定事件', icon: Crosshair, desc: '手动选择事件' },
 ]

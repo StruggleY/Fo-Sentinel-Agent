@@ -9,11 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"Fo-Sentinel-Agent/internal/dao"
+	milvus "Fo-Sentinel-Agent/internal/dao/milvus"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"Fo-Sentinel-Agent/internal/service/pipeline"
 	"Fo-Sentinel-Agent/internal/service/scheduler"
-	"Fo-Sentinel-Agent/utility/client"
-	"Fo-Sentinel-Agent/utility/common"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/google/uuid"
@@ -107,8 +106,8 @@ func Delete(ctx context.Context, id string) error {
 	if err != nil {
 		g.Log().Warningf(ctx, "[Subscription] 查询已索引事件失败，跳过 Milvus 清理: source=%s, err=%v", sub.Name, err)
 	} else if len(eventIDs) > 0 {
-		// 批量删除 Milvus 向量（每批 100 条，防止过滤表达式过长）
-		if err = deleteVectorsInBatches(ctx, eventIDs); err != nil {
+		// 委托 dao/milvus 层执行分批向量删除
+		if err = milvus.DeleteEventsByIDs(ctx, eventIDs); err != nil {
 			g.Log().Warningf(ctx, "[Subscription] Milvus 向量删除失败，继续执行: source=%s, count=%d, err=%v", sub.Name, len(eventIDs), err)
 		} else {
 			g.Log().Infof(ctx, "[Subscription] Milvus 向量删除成功: source=%s, count=%d", sub.Name, len(eventIDs))
@@ -126,32 +125,6 @@ func Delete(ctx context.Context, id string) error {
 	}
 	// 注销调度任务，cancel 对应订阅的抓取 goroutine
 	scheduler.Unregister(id)
-	return nil
-}
-
-// deleteVectorsInBatches 按批次删除 Milvus 中指定 ID 的向量。
-// 每批 100 条，防止 Milvus 过滤表达式过长导致请求失败。
-func deleteVectorsInBatches(ctx context.Context, ids []string) error {
-	const batchSize = 100
-	milvusCli, err := client.GetMilvusClient(ctx)
-	if err != nil {
-		return fmt.Errorf("连接 Milvus 失败: %w", err)
-	}
-	for i := 0; i < len(ids); i += batchSize {
-		end := i + batchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		batch := ids[i:end]
-		quoted := make([]string, len(batch))
-		for j, id := range batch {
-			quoted[j] = `"` + id + `"`
-		}
-		expr := fmt.Sprintf("id in [%s]", strings.Join(quoted, ", "))
-		if err = milvusCli.Delete(ctx, common.MilvusCollectionName, "", expr); err != nil {
-			return fmt.Errorf("删除第 %d-%d 批向量失败: %w", i, end, err)
-		}
-	}
 	return nil
 }
 
@@ -178,56 +151,33 @@ func Resume(ctx context.Context, id string) error {
 	return nil
 }
 
-// FetchNow 手动立即触发单次抓取，同步返回统计结果。
-// 与调度器不同：同步执行，支持对已暂停订阅手动触发，结果直接返回。
+// FetchNow 手动立即触发单次抓取，同步返回统计结果。支持对已暂停订阅手动触发。
 func FetchNow(ctx context.Context, id string) (fetchedCount, inserted int, totalEvents int64, durationMs int64, err error) {
 	start := time.Now()
-	// 不过滤 enabled 状态，支持手动触发已暂停订阅
 	sub, err := dao.FindByID(ctx, id)
 	if err != nil {
 		return
 	}
-	// 执行完整抓取 → 提取 → 去重入库流水线
 	items, fetchErr := pipeline.Fetch(ctx, sub)
 	durationMs = time.Since(start).Milliseconds()
 	if fetchErr != nil {
-		// 记录失败日志
-		_ = dao.CreateFetchLog(ctx, &dao.FetchLog{
-			SubscriptionID: id,
-			Status:         "failed",
-			DurationMs:     durationMs,
-			ErrorMsg:       fetchErr.Error(),
-		})
 		err = fetchErr
 		return
 	}
 	fetchedCount = len(items)
-	// 提取安全事件
 	events := pipeline.Extract(items)
-	// 去重入库，返回实际新增的事件列表（含完整 content）
 	newEvents, dedupErr := pipeline.DedupAndInsert(ctx, events)
 	if dedupErr != nil {
 		err = dedupErr
 		return
 	}
 	inserted = len(newEvents)
-	// 更新最后抓取时间
 	_ = dao.UpdateLastFetchAt(ctx, id, time.Now())
-	// 立即对新增事件执行向量索引（异步，不阻塞 HTTP 响应）
 	if len(newEvents) > 0 {
 		pipeline.IndexDocumentsAsync(ctx, newEvents)
 	}
-	// 统计该订阅来源的历史事件总数
 	totalEvents, _ = dao.CountEventsBySource(ctx, sub.Name)
 	durationMs = time.Since(start).Milliseconds()
-	// 记录成功日志
-	_ = dao.CreateFetchLog(ctx, &dao.FetchLog{
-		SubscriptionID: id,
-		Status:         "success",
-		FetchedCount:   fetchedCount,
-		NewCount:       inserted,
-		DurationMs:     durationMs,
-	})
 	return
 }
 

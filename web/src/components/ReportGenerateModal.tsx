@@ -49,7 +49,7 @@ export default function ReportGenerateModal() {
       const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
       const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
       const title = `安全事件分析报告 ${dateStr} ${timeStr}`
-      const markdown = buildMarkdown(riskData, agentLogs, analysisText)
+      const markdown = buildMarkdown(riskData, agentLogs)
       const payload: ReportPayload = {
         format: 'sentinel-report-v1',
         meta: {

@@ -3,7 +3,6 @@ package report
 import (
 	"context"
 	"encoding/json"
-	"log"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -161,7 +160,7 @@ func NewQueryReportTemplatesTool() tool.InvokableTool {
 			return string(b), nil
 		})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return t
 }

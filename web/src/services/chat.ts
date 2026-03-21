@@ -1,10 +1,8 @@
 import api from './api'
 import { streamFetch } from '@/utils/sse'
 import {
-  ChatMessage,
-  ChatRequest,
-  ChatResponse,
   ApiResponse,
+  UploadConfig,
 } from '@/types'
 
 // 会话接口
@@ -18,7 +16,7 @@ export interface ChatSession {
 
 // 生成会话ID
 const generateSessionId = () => {
-  return 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9)
+  return Date.now() + '-' + Math.random().toString(36).substr(2, 9)
 }
 
 // 获取当前会话ID
@@ -115,51 +113,40 @@ export const chatService = {
   },
 
   // Intent 意图驱动多 Agent 对话
-  supervisorChat: (
+  multiAgentChat: (
     query: string,
+    deepThinking: boolean,
+    webSearch: boolean,
     onMessage: (intent: string, content: string) => void,
-    onDone: () => void
+    onDone: () => void,
+    signal?: AbortSignal
   ) => {
     streamFetch(
-      '/api/chat/v1/intent_recognition',
-      { query },
+      '/api/chat/v1/chat',
+      { query, session_id: getCurrentSessionId(), deep_thinking: deepThinking, web_search: webSearch },
       (type, content) => onMessage(type, content),
-      onDone
-    )
-  },
-
-  // 普通对话
-  async chat(data: ChatRequest): Promise<ChatResponse> {
-    const res = await api.post<ApiResponse<{ answer: string }>>('/chat', {
-      Id: chatService.getSessionId(),
-      Question: data.message,
-    })
-    return { reply: res.data.data.answer }
-  },
-
-  // 流式对话
-  chatStream: (
-    data: { message: string; history?: ChatMessage[] },
-    onMessage: (content: string) => void,
-    onDone: () => void,
-    onError: (error: Error) => void
-  ): void => {
-    streamFetch(
-      '/api/chat_stream',
-      { Id: chatService.getSessionId(), Question: data.message },
-      (_type, content) => onMessage(content),
       onDone,
-      onError
+      undefined,
+      signal
     )
   },
 
-  // 文件上传
+  // 文件上传（支持多格式和分块配置）
   async uploadFile(
     file: File,
+    config?: UploadConfig,
     onProgress?: (progress: number) => void
   ): Promise<{ file_id: string; filename: string }> {
     const formData = new FormData()
     formData.append('file', file)
+    if (config) {
+      formData.append('strategy', config.strategy)
+      if (config.chunk_size)   formData.append('chunk_size',   String(config.chunk_size))
+      if (config.overlap_size) formData.append('overlap_size', String(config.overlap_size))
+      if (config.target_chars) formData.append('target_chars', String(config.target_chars))
+      if (config.max_chars)    formData.append('max_chars',    String(config.max_chars))
+      if (config.min_chars)    formData.append('min_chars',    String(config.min_chars))
+    }
     const res = await api.post<ApiResponse<{ fileName: string; filePath: string; fileSize: number }>>(
       '/upload',
       formData,

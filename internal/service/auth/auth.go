@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
-	"Fo-Sentinel-Agent/internal/auth"
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
+	"Fo-Sentinel-Agent/utility/auth"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"golang.org/x/crypto/bcrypt"

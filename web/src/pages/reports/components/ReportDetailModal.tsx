@@ -2,7 +2,8 @@ import { X, Download, Copy, Check, Calendar, FileText, AlertTriangle } from 'luc
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { formatDate, parseReportPayload } from '@/utils'
+import { formatDate, parseReportPayload, normalizeMarkdown } from '@/utils'
+import ReportViewer from '@/components/report/ReportViewer'
 
 interface ReportDetailModalProps {
   report: {
@@ -35,7 +36,7 @@ export default function ReportDetailModal({ report, onClose }: ReportDetailModal
   const payload = parseReportPayload(report.content)
   const displayMarkdown = payload?.markdown ?? report.content
   const eventCount = payload?.meta.event_count ?? report.event_count
-  const criticalCount = payload?.meta.critical_count ?? report.critical_count
+  const criticalCount = payload?.meta.critical_count ?? report.critical_count ?? 0
   const highCount = payload?.meta.high_count ?? 0
 
   const handleCopy = async () => {
@@ -143,9 +144,14 @@ ${displayMarkdown.replace(/\n/g, '<br>')}
               <p className="text-sm text-amber-800 font-medium">{report.summary}</p>
             </div>
           )}
-          <div className="prose max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayMarkdown}</ReactMarkdown>
-          </div>
+          {payload
+            ? <ReportViewer data={payload.risk_data} logs={payload.agent_logs} />
+            : (
+              <div className="prose max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeMarkdown(displayMarkdown)}</ReactMarkdown>
+              </div>
+            )
+          }
         </div>
 
         {/* Footer */}

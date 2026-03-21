@@ -7,7 +7,6 @@ import (
 	"context"
 
 	v1 "Fo-Sentinel-Agent/api/subscription/v1"
-	"Fo-Sentinel-Agent/internal/dao"
 	subsvc "Fo-Sentinel-Agent/internal/service/subscription"
 )
 
@@ -87,30 +86,7 @@ func (c *ControllerV1) Resume(ctx context.Context, req *v1.ResumeReq) (*v1.Resum
 	return &v1.ResumeRes{}, nil
 }
 
-// FetchLogs 返回指定订阅的抓取日志列表，按时间倒序分页。
-func (c *ControllerV1) FetchLogs(ctx context.Context, req *v1.FetchLogsReq) (*v1.FetchLogsRes, error) {
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	logs, total, err := dao.ListFetchLogs(ctx, req.SubscriptionID, limit, req.Offset)
-	if err != nil {
-		return &v1.FetchLogsRes{Total: 0, Logs: []v1.FetchLogItem{}}, nil
-	}
-	items := make([]v1.FetchLogItem, 0, len(logs))
-	for _, l := range logs {
-		items = append(items, v1.FetchLogItem{
-			ID:           l.ID,
-			Status:       l.Status,
-			FetchedCount: l.FetchedCount,
-			NewCount:     l.NewCount,
-			DurationMs:   l.DurationMs,
-			ErrorMsg:     l.ErrorMsg,
-			CreatedAt:    l.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		})
-	}
-	return &v1.FetchLogsRes{Total: total, Logs: items}, nil
-}
+// Fetch 手动立即触发指定订阅的单次抓取，同步返回统计数据。
 func (c *ControllerV1) Fetch(ctx context.Context, req *v1.FetchReq) (*v1.FetchRes, error) {
 	fetchedCount, inserted, totalEvents, durationMs, err := subsvc.FetchNow(ctx, req.ID)
 	if err != nil {

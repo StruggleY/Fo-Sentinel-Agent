@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"Fo-Sentinel-Agent/internal/service/pipeline"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -68,16 +68,14 @@ func Run(ctx context.Context) {
 
 	// 从数据库加载所有已启用的订阅，逐一注册独立的抓取 goroutine
 	// 数据库不可用时仅打印警告，调度器仍可正常启动（新订阅通过 Register 热注册）
-	db, err := dao.DB(ctx)
+	enabled := true
+	subs, err := dao.ListSubscriptions(ctx, &enabled)
 	if err != nil {
-		log.Printf("[scheduler] 数据库连接失败，跳过订阅加载: %v", err)
+		log.Printf("[scheduler] 加载订阅失败，跳过初始注册: %v", err)
 	} else {
-		var subs []dao.Subscription
-		if err = db.Where("enabled = ?", true).Find(&subs).Error; err == nil {
-			for i := range subs {
-				// 使用下标传地址，避免 for range 的 item 变量被循环复用导致地址相同
-				registerLocked(&subs[i])
-			}
+		for i := range subs {
+			// 使用下标传地址，避免 for range 的 item 变量被循环复用导致地址相同
+			registerLocked(&subs[i])
 		}
 	}
 
@@ -141,27 +139,15 @@ func runFetchLoop(ctx context.Context, subID string, interval time.Duration) {
 // 每次执行前从数据库重新加载订阅状态，确保 CronExpr、URL 等变更即时生效。
 // 订阅已被暂停或删除时静默退出，避免已注销的 goroutine 写入脏数据。
 func doFetch(ctx context.Context, subID string) {
-	start := time.Now()
-	db, err := dao.DB(ctx)
+	// 每次 tick 重新查询订阅状态，同时校验 enabled=true，防止已暂停订阅误抓
+	sub, err := dao.FindEnabledByID(ctx, subID)
 	if err != nil {
-		return
-	}
-	var sub dao.Subscription
-	// 同时检查 enabled=true，goroutine 未来得及退出时也不会误抓已暂停的订阅
-	if err = db.Where("id = ? AND enabled = ?", subID, true).First(&sub).Error; err != nil {
 		return // 订阅已暂停或删除，本次跳过，goroutine 等待下次 tick 或 ctx.Done()
 	}
-	// 调用 pipeline.Fetch 按订阅类型（RSS/GitHub/Webhook）抓取原始条目
-	items, fetchErr := pipeline.Fetch(ctx, &sub)
+	// 调用 pipeline.Fetch 按订阅类型（RSS/GitHub）抓取原始条目
+	items, fetchErr := pipeline.Fetch(ctx, sub)
 	if fetchErr != nil {
 		g.Log().Warningf(ctx, "[scheduler] 抓取 %q 失败: %v", sub.Name, fetchErr)
-		// 记录失败日志
-		_ = dao.CreateFetchLog(ctx, &dao.FetchLog{
-			SubscriptionID: subID,
-			Status:         "failed",
-			DurationMs:     time.Since(start).Milliseconds(),
-			ErrorMsg:       fetchErr.Error(),
-		})
 		return
 	}
 	// 将原始条目转换为标准化 Event（推断 severity、提取 CVE 等）
@@ -172,17 +158,10 @@ func doFetch(ctx context.Context, subID string) {
 		g.Log().Warningf(ctx, "[scheduler] 去重入库 %q 失败: %v", sub.Name, err)
 		return
 	}
-	durationMs := time.Since(start).Milliseconds()
 	// 更新订阅的最后抓取时间，供前端展示
-	db.Model(&dao.Subscription{}).Where("id = ?", subID).Update("last_fetch_at", time.Now())
-	// 记录成功日志
-	_ = dao.CreateFetchLog(ctx, &dao.FetchLog{
-		SubscriptionID: subID,
-		Status:         "success",
-		FetchedCount:   len(items),
-		NewCount:       len(inserted),
-		DurationMs:     durationMs,
-	})
+	if err = dao.UpdateLastFetchAt(ctx, subID, time.Now()); err != nil {
+		g.Log().Warningf(ctx, "[scheduler] 更新 last_fetch_at 失败（%s）: %v", subID, err)
+	}
 	if len(inserted) > 0 {
 		g.Log().Infof(ctx, "[scheduler] %q 新增 %d 条事件", sub.Name, len(inserted))
 		// 立即对新增事件执行向量索引

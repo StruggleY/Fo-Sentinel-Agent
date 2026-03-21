@@ -7,6 +7,13 @@ import EventAnalysis from './pages/event-analysis'
 import Reports from './pages/reports'
 import Chat from './pages/chat'
 import Settings from './pages/settings'
+import TermMapping from './pages/term-mapping'
+import Traces from './pages/traces'
+import TraceDetail from './pages/traces/detail'
+import Knowledge from './pages/knowledge'
+import KnowledgeDocs from './pages/knowledge/docs'
+import KnowledgeChunks from './pages/knowledge/chunks'
+import RagEval from './pages/rag-eval'
 
 function App() {
   return (
@@ -21,6 +28,13 @@ function App() {
           <Route path="reports" element={<Reports />} />
           <Route path="chat" element={<Chat />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="term-mapping" element={<TermMapping />} />
+          <Route path="traces" element={<Traces />} />
+          <Route path="traces/:traceId" element={<TraceDetail />} />
+          <Route path="knowledge" element={<Knowledge />} />
+          <Route path="knowledge/:baseId/docs" element={<KnowledgeDocs />} />
+          <Route path="knowledge/:baseId/docs/:docId/chunks" element={<KnowledgeChunks />} />
+          <Route path="rag-eval" element={<RagEval />} />
         </Route>
       </Routes>
     </BrowserRouter>

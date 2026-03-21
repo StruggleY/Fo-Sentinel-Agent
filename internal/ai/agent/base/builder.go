@@ -2,9 +2,14 @@ package base
 
 import (
 	"context"
+	"io"
 	"time"
 
-	retriever2 "Fo-Sentinel-Agent/internal/ai/retriever"
+	"Fo-Sentinel-Agent/internal/ai/rerank"
+	"Fo-Sentinel-Agent/internal/ai/retriever"
+	"Fo-Sentinel-Agent/internal/ai/rewrite"
+	"Fo-Sentinel-Agent/internal/ai/rule"
+	"Fo-Sentinel-Agent/internal/ai/split"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/prompt"
@@ -12,47 +17,47 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
-// BuildConfig 公共 RAG+ReAct DAG 构建配置。
-// 各 Agent 通过差异化此配置来定制自己的行为，消除重复的 DAG 搭建代码。
+// BuildConfig 公共 RAG+ReAct DAG 构建配置，由 agent.NewSingletonAgent 工厂调用。
 type BuildConfig struct {
-	GraphName    string                     // DAG 图名称，用于日志追踪和性能监控
-	SystemPrompt string                     // 系统提示词，须包含 {date} 和 {documents} 占位符
-	MaxStep      int                        // ReAct 最大推理步数，≤0 时使用默认值 15
-	Model        model.ToolCallingChatModel // 支持 Function Calling 的 LLM 实例
-	Tools        []tool.BaseTool            // ReAct Agent 可调用的工具集
+	GraphName      string                     // Eino 链路追踪和日志定位用
+	SystemPrompt   string                     // 须含 {date}、{documents}、{content}、{history} 占位符
+	MaxStep        int                        // ReAct 最大步数，≤0 取默认值 15
+	Model          model.ToolCallingChatModel // 支持 Function Calling 的 LLM 实例
+	Tools          []tool.BaseTool            // ReAct 可调用的工具集
+	RewriteEnabled bool                       // 检索前查询重写（适合多轮对话，消除代词歧义）
+	SplitEnabled   bool                       // 子问题拆分+并行检索+Rerank（适合复杂多维查询）
 }
 
-// BuildReactAgentGraph 构建标准五节点 RAG+ReAct 有向无环图并返回可执行 Runnable。
+// BuildReactAgentGraph 构建标准 RAG+ReAct DAG，返回可执行 Runnable。
+// 适用于 event_analysis / report / risk / solve 四个 Agent，配置不同但拓扑一致。
 //
-// 适用场景：event_analysis / report / risk 三个 Agent（DAG 拓扑完全一致，仅配置不同）。
-// 不适用：
-//   - chat_pipeline：InputToChat 含 Token 感知压缩逻辑，需保留自己的 Lambda
-//   - summary_pipeline：线性 4 节点流水线，无 RAG 分支
-//   - plan_pipeline：plan-execute-replan 架构，使用 adk.Agent
-//   - knowledge_index_pipeline：文档索引管道，输入输出类型完全不同
+// 拓扑 A（SplitEnabled=false）：
 //
-// DAG 拓扑：
+//	START → InputToRag → MilvusRetriever ─┐
+//	START → InputToChat ──────────────────┤
+//	                                       ▼
+//	                               Template → ReactAgent → END
 //
-//	START
-//	  ├── InputToRag  → MilvusRetriever ──┐
-//	  └── InputToChat ────────────────────┤
-//	                                      ▼
-//	                               Template（FString 组装 System+History+User）
-//	                                      ▼
-//	                               ReactAgent（ReAct 循环，调用工具推理）
-//	                                      ▼
-//	                                    END
+// 拓扑 B（SplitEnabled=true）：
 //
-// 触发模式：AllPredecessor —— Template 节点等待两条并行支路全部完成后再触发（fan-in 屏障）。
+//	START → RetrievalNode（重写→拆分→并行检索→去重→Rerank）─┐
+//	START → InputToChat ─────────────────────────────────────┤
+//	                                                           ▼
+//	                                               Template → ReactAgent → END
+//
+// Template 使用 AllPredecessor 触发模式，等待两条并行支路全部完成后才汇聚。
 func BuildReactAgentGraph(ctx context.Context, cfg BuildConfig) (compose.Runnable[*UserMessage, *schema.Message], error) {
+	// 节点名称常量：用于 AddEdge 时引用
 	const (
-		InputToRag      = "InputToRag"
-		InputToChat     = "InputToChat"
-		MilvusRetriever = "MilvusRetriever"
-		Template        = "Template"
-		ReactAgent      = "ReactAgent"
+		InputToRag      = "InputToRag"      // 拓扑 A：提取并可选改写查询字符串
+		InputToChat     = "InputToChat"     // 两种拓扑共用：构建 Prompt 变量 map
+		MilvusRetriever = "MilvusRetriever" // 拓扑 A：执行向量检索
+		RetrievalNode   = "RetrievalNode"   // 拓扑 B：统一检索流水线
+		Template        = "Template"        // 两种拓扑共用：FString 组装消息列表
+		ReactAgent      = "ReactAgent"      // 两种拓扑共用：ReAct 推理循环
 	)
 
 	maxStep := cfg.MaxStep
@@ -60,17 +65,18 @@ func BuildReactAgentGraph(ctx context.Context, cfg BuildConfig) (compose.Runnabl
 		maxStep = 15
 	}
 
-	g := compose.NewGraph[*UserMessage, *schema.Message]()
+	topology := "A(InputToRag+MilvusRetriever)"
+	if cfg.SplitEnabled {
+		topology = "B(RetrievalNode)"
+	}
+	g.Log().Infof(ctx, "[Builder] 构建 DAG | graph=%s | topology=%s | maxStep=%d | tools=%d | rewrite=%v",
+		cfg.GraphName, topology, maxStep, len(cfg.Tools), cfg.RewriteEnabled)
 
-	// InputToRag：提取 Query 字符串，作为向量检索的输入文本（类型适配：*UserMessage → string）
-	_ = g.AddLambdaNode(InputToRag, compose.InvokableLambda(
-		func(ctx context.Context, input *UserMessage) (string, error) {
-			return input.Query, nil
-		},
-	))
+	graph := compose.NewGraph[*UserMessage, *schema.Message]()
 
-	// InputToChat：构建 Prompt 模板变量 map，注入 content / history / date 三个占位符
-	_ = g.AddLambdaNode(InputToChat, compose.InvokableLambda(
+	// ── InputToChat：两种拓扑共用 ──────────────────────────────────────────
+	// 将 *UserMessage 转换为 Template 所需的变量 map，与检索支路并行执行
+	_ = graph.AddLambdaNode(InputToChat, compose.InvokableLambda(
 		func(ctx context.Context, input *UserMessage) (map[string]any, error) {
 			return map[string]any{
 				"content": input.Query,
@@ -78,55 +84,146 @@ func BuildReactAgentGraph(ctx context.Context, cfg BuildConfig) (compose.Runnabl
 				"date":    time.Now().Format("2006-01-02 15:04:05"),
 			}, nil
 		},
-	))
+	), compose.WithNodeName(InputToChat))
 
-	// MilvusRetriever：从向量数据库检索语义相关文档（含 Redis 语义缓存，TTL 24h，阈值 0.85）
-	// WithOutputKey("documents")：检索结果以 "documents" 为 key 合并进 fan-in map，
-	// 供 Template 节点通过 {documents} 占位符读取
-	retriever, err := retriever2.GetRetriever(ctx)
-	if err != nil {
-		return nil, err
+	if cfg.SplitEnabled {
+		// ── 拓扑 B：统一 RetrievalNode ─────────────────────────────────────
+		// 流程：术语归一化 → 合并改写+拆分（单次 LLM）→ 并行检索去重 → Rerank（可选）
+		// WithOutputKey("documents") 将结果注入 Template 的 {documents} 占位符
+		_ = graph.AddLambdaNode(RetrievalNode, compose.InvokableLambda(
+			func(ctx context.Context, input *UserMessage) ([]*schema.Document, error) {
+				q := input.Query
+
+				// Step1：术语归一化（进程内缓存，<1ms，无 LLM）
+				q = rule.Normalize(ctx, q)
+
+				// Step2：合并改写+拆分（单次 LLM）
+				var queries []string
+				if cfg.RewriteEnabled {
+					_, queries = rewrite.RewriteAndSplit(ctx, q, input.History)
+				} else {
+					queries = split.SplitQuestions(ctx, q)
+				}
+
+				// Step3：并发检索所有子查询，聚合去重
+				r, err := retriever.GetRetriever(ctx)
+				if err != nil {
+					g.Log().Warningf(ctx, "[RetrievalNode] 获取检索器失败: %v", err)
+					return nil, err
+				}
+				docs, err := retriever.MultiRetrieve(ctx, r, queries)
+				if err != nil {
+					g.Log().Warningf(ctx, "[RetrievalNode] 向量检索失败: %v", err)
+					return nil, err
+				}
+				g.Log().Debugf(ctx, "[RetrievalNode] 检索完成 | 子查询数=%d | 文档数=%d", len(queries), len(docs))
+
+				// Step4：Rerank 精排（GetClient 返回 nil 表示未启用，直接跳过）
+				if rc, _ := rerank.GetClient(ctx); rc != nil && len(docs) > 1 {
+					rerankResults := rc.Rerank(ctx, input.Query, docs, retriever.DefaultFinalTopK)
+					docs = make([]*schema.Document, 0, len(rerankResults))
+					for _, r := range rerankResults {
+						docs = append(docs, r.Doc)
+					}
+				}
+
+				return docs, nil
+			},
+		), compose.WithOutputKey("documents"), compose.WithNodeName(RetrievalNode))
+
+		_ = graph.AddEdge(compose.START, RetrievalNode)
+		_ = graph.AddEdge(compose.START, InputToChat)
+
+	} else {
+		// ── 拓扑 A：InputToRag + MilvusRetriever 两节点 ────────────────────
+		// InputToRag：提取查询字符串，可选查询重写
+		_ = graph.AddLambdaNode(InputToRag, compose.InvokableLambda(
+			func(ctx context.Context, input *UserMessage) (string, error) {
+				query := input.Query
+				// Step1：术语归一化（进程内缓存，<1ms，无 LLM）
+				query = rule.Normalize(ctx, query)
+				// Step2：查询改写（有对话历史时消除代词歧义）
+				if cfg.RewriteEnabled && len(input.History) > 0 {
+					query = rewrite.RewriteQuery(ctx, query, input.History)
+				}
+				return query, nil
+			},
+		), compose.WithNodeName(InputToRag))
+
+		// MilvusRetriever：向量检索（内含 Redis 语义缓存，缓存命中跳过 Milvus）
+		r, err := retriever.GetRetriever(ctx)
+		if err != nil {
+			g.Log().Warningf(ctx, "[Builder] 获取检索器失败 | graph=%s: %v", cfg.GraphName, err)
+			return nil, err
+		}
+		_ = graph.AddRetrieverNode(MilvusRetriever, r, compose.WithOutputKey("documents"))
+
+		_ = graph.AddEdge(compose.START, InputToRag)
+		_ = graph.AddEdge(compose.START, InputToChat)
+		_ = graph.AddEdge(InputToRag, MilvusRetriever)
 	}
-	_ = g.AddRetrieverNode(MilvusRetriever, retriever, compose.WithOutputKey("documents"))
 
-	// Template：使用 FString 格式将系统提示、历史消息列表、用户消息组装为完整 Message 列表
-	// 渲染后输出：[SystemMessage(systemPrompt), ...history, UserMessage(content)]
+	// ── Template：两种拓扑共用 ─────────────────────────────────────────────
+	// FString 组装：SystemMessage(含 {date}/{documents}) + MessagesPlaceholder(history) + UserMessage({content})
+	// fan-in：InputToChat 输出的 map 与检索节点的 "documents" key 在此汇聚
+	// 注意：指向 Template 的边必须在节点加入 graph 之后才能添加
 	ctp := prompt.FromMessages(schema.FString,
 		schema.SystemMessage(cfg.SystemPrompt),
 		schema.MessagesPlaceholder("history", false),
 		schema.UserMessage("{content}"),
 	)
-	_ = g.AddChatTemplateNode(Template, ctp)
+	_ = graph.AddChatTemplateNode(Template, ctp)
 
-	// ReactAgent：ReAct 循环（Reasoning + Acting），通过多步推理调用工具后生成最终结论
-	// MaxStep 限制最大推理轮次，防止 LLM 陷入无限工具调用循环
+	// 指向 Template 的汇聚边（两种拓扑），在 Template 节点加入后添加
+	if cfg.SplitEnabled {
+		_ = graph.AddEdge(RetrievalNode, Template)
+		_ = graph.AddEdge(InputToChat, Template)
+	} else {
+		_ = graph.AddEdge(MilvusRetriever, Template)
+		_ = graph.AddEdge(InputToChat, Template)
+	}
+
+	// ── ReactAgent：两种拓扑共用 ───────────────────────────────────────────
+	// AnyLambda 同时封装 Generate（同步）和 Stream（流式），支持 SSE 调用
 	agentCfg := &react.AgentConfig{MaxStep: maxStep}
 	agentCfg.ToolCallingModel = cfg.Model
 	agentCfg.ToolsConfig.Tools = cfg.Tools
+	// DeepSeek V3 流式输出顺序：先文字内容 → 后 tool calls
+	// 默认 firstChunkStreamToolCallChecker 只检查第一个 chunk：遇到文字内容就返回 false（无工具调用），
+	// 导致 agent 提前路由到 END，工具永远不会被执行，只有规划文字出现在输出中。
+	// 此处读取完整流来检测，确保正确识别 DeepSeek V3 的 tool calls。
+	agentCfg.StreamToolCallChecker = func(ctx context.Context, sr *schema.StreamReader[*schema.Message]) (bool, error) {
+		defer sr.Close()
+		for {
+			msg, err := sr.Recv()
+			if err == io.EOF {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if len(msg.ToolCalls) > 0 {
+				return true, nil
+			}
+		}
+	}
 	agent, err := react.NewAgent(ctx, agentCfg)
 	if err != nil {
+		g.Log().Errorf(ctx, "[Builder] ReactAgent 初始化失败 | graph=%s: %v", cfg.GraphName, err)
 		return nil, err
 	}
-	// AnyLambda 同时封装同步（Generate）和流式（Stream）两种调用方式
 	reactLambda, err := compose.AnyLambda(agent.Generate, agent.Stream, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	_ = g.AddLambdaNode(ReactAgent, reactLambda)
+	_ = graph.AddLambdaNode(ReactAgent, reactLambda, compose.WithNodeName(ReactAgent))
 
-	// 边定义：RAG 支路与对话历史支路并行执行，在 Template 节点 fan-in 汇聚
-	_ = g.AddEdge(compose.START, InputToRag)
-	_ = g.AddEdge(compose.START, InputToChat)
-	_ = g.AddEdge(InputToRag, MilvusRetriever)
-	_ = g.AddEdge(MilvusRetriever, Template)
-	_ = g.AddEdge(InputToChat, Template)
-	_ = g.AddEdge(Template, ReactAgent)
-	_ = g.AddEdge(ReactAgent, compose.END)
+	_ = graph.AddEdge(Template, ReactAgent)
+	_ = graph.AddEdge(ReactAgent, compose.END)
 
-	return g.Compile(ctx,
+	return graph.Compile(ctx,
 		compose.WithGraphName(cfg.GraphName),
-		// AllPredecessor：Template 节点需等待 MilvusRetriever 和 InputToChat 全部完成才触发
-		// 若使用默认 AnyPredecessor，任意一路完成即触发，另一路数据被丢弃，Prompt 渲染会出错
+		// AllPredecessor：Template 等待检索支路和 InputToChat 全部完成后才触发
 		compose.WithNodeTriggerMode(compose.AllPredecessor),
 	)
 }

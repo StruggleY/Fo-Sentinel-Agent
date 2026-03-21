@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Settings as SettingsIcon, Save, Loader2 } from 'lucide-react'
+import { Settings as SettingsIcon, Save, Loader2, User, LogOut } from 'lucide-react'
 import { cn } from '@/utils'
 import toast from 'react-hot-toast'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -78,7 +78,34 @@ export default function Settings() {
         </div>
 
         {/* Content */}
-        <div className="flex-1">
+        <div className="flex-1 space-y-6">
+          {/* Admin User Info Card */}
+          <div className="card">
+            <div className="card-body">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
+                    <User className="h-6 w-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900">Admin</h3>
+                    <p className="text-sm text-gray-500">管理员</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    localStorage.removeItem('token')
+                    window.location.href = '/login'
+                  }}
+                  className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  <LogOut className="h-4 w-4" />
+                  退出登录
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="card">
             <div className="card-body space-y-6">
               <div>

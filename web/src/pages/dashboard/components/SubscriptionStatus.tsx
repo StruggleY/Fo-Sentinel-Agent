@@ -57,15 +57,15 @@ export default function SubscriptionStatus() {
   }
 
   return (
-    <div className="table-container">
-      <table className="table">
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
         <thead>
-          <tr>
-            <th>名称</th>
-            <th>类型</th>
-            <th>状态</th>
-            <th>上次抓取</th>
-            <th>事件数</th>
+          <tr className="border-y border-slate-100 bg-slate-50">
+            <th className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">名称</th>
+            <th className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">类型</th>
+            <th className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">状态</th>
+            <th className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">上次抓取</th>
+            <th className="px-5 py-2.5 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">事件数</th>
           </tr>
         </thead>
         <tbody>
@@ -73,21 +73,23 @@ export default function SubscriptionStatus() {
             const config = statusConfig[sub.status as keyof typeof statusConfig] || statusConfig.active
             const StatusIcon = config.icon
             return (
-              <tr key={sub.id} className="cursor-pointer">
-                <td className="font-medium">{sub.name}</td>
-                <td>
-                  <span className="tag tag-default">{getSourceTypeLabel(sub.source_type)}</span>
+              <tr key={sub.id} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors last:border-b-0">
+                <td className="px-5 py-3 min-w-0 max-w-0 w-full">
+                  <span className="block truncate text-xs font-medium text-slate-800">{sub.name}</span>
                 </td>
-                <td className="whitespace-nowrap">
-                  <span className={cn('flex items-center gap-1.5', config.color)}>
-                    <StatusIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                <td className="px-5 py-3 whitespace-nowrap">
+                  <span className="inline-flex items-center h-5 px-2 text-xs font-medium rounded bg-slate-100 text-slate-600">{getSourceTypeLabel(sub.source_type)}</span>
+                </td>
+                <td className="px-5 py-3 whitespace-nowrap">
+                  <span className={cn('inline-flex items-center gap-1 text-xs font-medium', config.color)}>
+                    <StatusIcon className="w-3 h-3 flex-shrink-0" />
                     {config.label}
                   </span>
                 </td>
-                <td className="text-gray-500">
+                <td className="px-5 py-3 whitespace-nowrap text-xs text-slate-400 tabular-nums">
                   {sub.last_fetch_at ? formatRelativeTime(sub.last_fetch_at) : '-'}
                 </td>
-                <td className="text-right">{sub.total_events || 0}</td>
+                <td className="px-5 py-3 whitespace-nowrap text-center text-xs font-semibold tabular-nums text-slate-700">{sub.total_events || 0}</td>
               </tr>
             )
           })}

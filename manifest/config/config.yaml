@@ -1,74 +1,121 @@
+# ── HTTP 服务器 ────────────────────────────────────────────────────────────────
 server:
   address: ":8000"
   openapiPath: "/api.json"
   swaggerPath: "/swagger"
-  clientMaxBodySize: 52428800  # 50 MB，HTTP Body 硬限制，防止超大文件打爆内存
+  clientMaxBodySize: 52428800  # 50 MB，防止超大文件上传打爆内存
 
+# ── 日志 ───────────────────────────────────────────────────────────────────────
 logger:
   level: "all"
   stdout: true
 
+# ── AI 模型 ────────────────────────────────────────────────────────────────────
+# 主推理模型（深度思考 / 各专业 Agent ReAct 推理）
 ds_think_chat_model:
-  api_key: "e0891aaf-3305-44ed-9b5b-56f800e171d3"
+  api_key: "your-api-key"
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   model: "deepseek-v3-1-terminus"
 
+# 快速模型（意图识别路由 / Executor 步骤调度，低延迟优先）
 ds_quick_chat_model:
-  api_key: "e0891aaf-3305-44ed-9b5b-56f800e171d3"
+  api_key: "your-api-key"
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   model: "deepseek-v3-1-terminus"
 
+# 向量嵌入模型（DashScope text-embedding-v4，同时用于 Rerank）
 doubao_embedding_model:
-  api_key: "sk-ccb4e6c8f65f478b9ac539f5361446ce"
+  api_key: "your-dashscope-api-key"
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
   model: "text-embedding-v4"
 
-file_dir: "d:/GoProject/Fo-Sentinel-Agent/docs"
+# 内部文档知识库根目录（query_internal_docs 工具扫描此路径）
+file_dir: "docs"
 
-# Redis 全局配置（供语义缓存、对话历史等模块复用）
+# ── Redis ──────────────────────────────────────────────────────────────────────
 redis:
   addr: "localhost:6379"
   password: ""
   db: 0
-  # 语义缓存配置（RAG 检索结果缓存，减少重复 Embedding+Milvus 调用）
+
+  # 语义缓存：对 RAG 检索结果缓存，相似度命中时跳过 Embedding + Milvus 调用
   semantic_cache:
-    ttl: 24                # 缓存有效期（小时）
-    threshold: 0.85        # 余弦相似度命中阈值
+    ttl: 24             # 缓存有效期（小时）
+    threshold: 0.85     # 余弦相似度命中阈值，高于此值视为缓存命中
     key_prefix: "rag:cache"
-    topk: 3                # Milvus 每次召回文档数
-    min_score: 0.30        # 召回结果最低相似度阈值
-  # 对话历史缓存配置（多轮对话上下文持久化，服务重启后可恢复）
+    topk: 5             # Milvus 初始召回候选文档数（扩大候选池，提升召回率）
+    final_topk: 3       # 返回给 LLM 的最终文档数（从候选池截取，topk >= final_topk）
+    min_score: 0.30     # 向量检索结果最低相似度阈值，低于此值的文档丢弃
+
+# ── 检索增强（RAG） ────────────────────────────────────────────────────────────
+retriever:
+  # 查询重写：消除多轮对话中的代词歧义、补全上下文，增加约 200ms 延迟
+  rewrite_enabled: true
+  # 子问题拆分：将复杂查询拆分为多个子查询并行检索，增加约 300ms 延迟
+  split_enabled: true
+  # 意图置信度阈值：低于此值时返回歧义引导提示，而非强制路由
+  confidence_threshold: 0.70
+
+  # 对话历史缓存：多轮对话上下文持久化到 Redis，服务重启后可恢复
   chat_cache:
-    ttl: 720               # 缓存有效期（小时），30 天 = 30*24
+    ttl: 720            # 缓存有效期（小时），720h = 30 天
     key_prefix: "session"
 
-# MySQL 配置（事件/订阅/报告表）
+  # Rerank 精排：对 Milvus 召回结果重新打分排序，提升检索精准度
+  rerank:
+    enabled: true
+    api_key: "your-dashscope-api-key"
+    model: "qwen3-rerank"
+    base_url: "https://dashscope.aliyuncs.com/compatible-api/v1"
+    instruct: "Given a web search query, retrieve relevant passages that answer the query."
+
+# ── 数据库 ─────────────────────────────────────────────────────────────────────
 database:
   mysql:
     dsn: "root:sentinel123@tcp(127.0.0.1:3307)/fo_sentinel?charset=utf8mb4&parseTime=True"
 
+# ── 认证 ───────────────────────────────────────────────────────────────────────
 auth:
   jwt:
-    enabled: false          # 设为 true 启用 API 鉴权
-    secret: "change-me-in-production"
+    enabled: false                    # 生产环境建议设为 true
+    secret: "change-me-in-production" # 生产环境务必替换为强随机字符串
     expire_hours: 24
   seed:
-    admin_password: "admin123"  # 首次初始化默认 admin 密码，生产环境务必修改
+    admin_password: "admin123"        # 首次初始化的管理员密码，生产环境务必修改
 
-# 工具配置
-tools:
-  cls_mcp_url: ""                    # 腾讯云 CLS 日志查询 MCP 接口地址，留空则禁用日志查询工具
-  prometheus_url: "http://127.0.0.1:9090"  # Prometheus 服务地址
-
-# 订阅事件调度器
+# ── 后台调度器 ─────────────────────────────────────────────────────────────────
 scheduler:
-  fetch_interval_minutes: 15
-  index_interval_minutes: 20
-  index_batch_size: 10        # 向量索引单批文档数，受 DashScope Embedding API 上限约束（≤10）
+  fetch_interval_minutes: 15  # 订阅源抓取间隔（分钟）
+  index_interval_minutes: 20  # 向量索引间隔（分钟）
+  index_batch_size: 10        # 单批向量化文档数，受 DashScope Embedding API 上限约束（≤ 10）
 
-# 对话记忆配置（分层记忆架构：短期记忆 + 长期摘要）
+# ── 对话记忆管理 ───────────────────────────────────────────────────────────────
 memory:
-  summaryTrigger: 30    # 消息数触发阈值（辅助触发器，超过此条数则触发总结）
-  summaryBatchSize: 10  # 消息数触发时每次总结的消息数量
-  tokenTrigger: 3000    # Token 触发阈值（主触发器，超出时触发总结）
-  minRecentMessages: 4  # 总结后最少保留的消息数（保证当前对话连贯性，建议 ≥ 4）
+  summaryTrigger: 30    # 消息数辅助触发阈值：超过此条数触发摘要压缩
+  summaryBatchSize: 10  # 每次摘要压缩的消息条数
+  tokenTrigger: 3000    # Token 主触发阈值：累计 Token 超出时触发摘要压缩
+  minRecentMessages: 4  # 摘要后最少保留的近期消息数（保证对话连贯性）
+
+# ── 工具 ───────────────────────────────────────────────────────────────────────
+tools:
+  web_search:
+    # Tavily Search API，专为 AI Agent 设计，申请地址：https://tavily.com
+    tavily_api_key: "tvly-xxxxxxxxxxxx"
+    tavily_base_url: "https://api.tavily.com/search"
+    tavily_search_depth: "advanced"   # basic（快速）| advanced（深度，结果更全）
+
+# ── 全链路追踪 ─────────────────────────────────────────────────────────────────
+trace:
+  enabled: true
+  max_error_length: 1000
+  record_prompt: false        # 是否记录 Prompt/Completion 原文（开启将显著增加写入量）
+
+# ── 知识库 ─────────────────────────────────────────────────────────────────────
+knowledge:
+  upload_dir: "manifest/upload/knowledge"  # 上传文件本地保存根目录
+  index_workers: 3                          # 索引 Worker Pool 并发数
+  queue_capacity: 1000                      # 索引任务队列容量
+  default_kb_name: "默认知识库"
+  parent_chunk_size: 1024                   # 父块大小（rune 数，hierarchical 策略）
+  child_chunk_size: 256                     # 子块大小（rune 数）
+  child_overlap_size: 40                    # 子块重叠窗口（rune 数）

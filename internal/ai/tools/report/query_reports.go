@@ -1,14 +1,14 @@
 package report
 
 import (
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // QueryReportsInput 查询报告参数
@@ -30,6 +30,7 @@ func NewQueryReportsTool() tool.InvokableTool {
 			if input.Limit <= 0 {
 				input.Limit = 10
 			}
+			g.Log().Infof(ctx, "[Tool] query_reports 开始 | type=%s | limit=%d", input.Type, input.Limit)
 			var reports []dao.Report
 			q := db.Limit(input.Limit).Order("created_at DESC")
 			if input.Type != "" {
@@ -38,11 +39,12 @@ func NewQueryReportsTool() tool.InvokableTool {
 			if err = q.Find(&reports).Error; err != nil {
 				return "", fmt.Errorf("query reports: %w", err)
 			}
+			g.Log().Infof(ctx, "[Tool] query_reports 完成 | 返回=%d 条", len(reports))
 			b, _ := json.Marshal(reports)
 			return string(b), nil
 		})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return t
 }

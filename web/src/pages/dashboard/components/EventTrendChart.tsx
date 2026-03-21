@@ -2,9 +2,20 @@ import { useState, useEffect } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { Loader2 } from 'lucide-react'
 import { eventService } from '@/services/event'
+import { cn } from '@/utils'
+
+// 时间窗口选项
+const TIME_WINDOWS = [
+  { label: '7天', value: 7 },
+  { label: '30天', value: 30 },
+  { label: '90天', value: 90 },
+] as const
+
+type WindowValue = 7 | 30 | 90
 
 export default function EventTrendChart() {
   const [loading, setLoading] = useState(true)
+  const [timeWindow, setTimeWindow] = useState<WindowValue>(30)
   const [dates, setDates] = useState<string[]>([])
   const [series, setSeries] = useState<{ critical: number[]; high: number[]; medium: number[]; low: number[] }>({
     critical: [],
@@ -15,16 +26,23 @@ export default function EventTrendChart() {
 
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true)
       try {
-        const items = await eventService.getTrend(30)
-        if (items.length === 0) { setLoading(false); return }
-        const sorted = [...items].reverse()
-        setDates(sorted.map(i => i.date))
+        const items = await eventService.getTrend(timeWindow)
+        // 生成完整日期序列，缺失天填 0，保证折线点数充足
+        const dataMap = new Map(items.map(i => [i.date, i]))
+        const filled = Array.from({ length: timeWindow }, (_, idx) => {
+          const d = new Date()
+          d.setDate(d.getDate() - (timeWindow - 1 - idx))
+          const dateStr = d.toISOString().slice(0, 10)
+          return dataMap.get(dateStr) ?? { date: dateStr, critical: 0, high: 0, medium: 0, low: 0 }
+        })
+        setDates(filled.map(i => i.date))
         setSeries({
-          critical: sorted.map(i => i.critical),
-          high: sorted.map(i => i.high),
-          medium: sorted.map(i => i.medium),
-          low: sorted.map(i => i.low),
+          critical: filled.map(i => i.critical),
+          high: filled.map(i => i.high),
+          medium: filled.map(i => i.medium),
+          low: filled.map(i => i.low),
         })
       } catch (error) {
         console.error('获取事件趋势失败:', error)
@@ -33,20 +51,46 @@ export default function EventTrendChart() {
       }
     }
     fetchData()
-  }, [])
+  }, [timeWindow])
+
+  // 时间窗口 Tab 条，始终渲染（含 loading 态）
+  const tabBar = (
+    <div className="flex items-center gap-0.5 mb-3">
+      {TIME_WINDOWS.map(tw => (
+        <button
+          key={tw.value}
+          onClick={() => setTimeWindow(tw.value as WindowValue)}
+          className={cn(
+            'px-2.5 py-1 text-xs rounded-md font-medium transition-colors',
+            timeWindow === tw.value
+              ? 'bg-primary-500 text-white'
+              : 'text-gray-500 hover:text-gray-700'
+          )}
+        >
+          {tw.label}
+        </button>
+      ))}
+    </div>
+  )
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center" style={{ height: '300px' }}>
-        <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+      <div>
+        {tabBar}
+        <div className="flex items-center justify-center" style={{ height: '272px' }}>
+          <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+        </div>
       </div>
     )
   }
 
   if (dates.length === 0) {
     return (
-      <div className="flex items-center justify-center text-gray-400 text-sm" style={{ height: '300px' }}>
-        暂无事件趋势数据
+      <div>
+        {tabBar}
+        <div className="flex items-center justify-center text-gray-400 text-sm" style={{ height: '272px' }}>
+          暂无事件趋势数据
+        </div>
       </div>
     )
   }
@@ -106,6 +150,7 @@ export default function EventTrendChart() {
     grid: { left: 12, right: 12, bottom: 28, top: 36, containLabel: true },
     xAxis: {
       type: 'category',
+      // 贴满左右，避免两端大块留白；smoothMonotone + clip 抑制平滑曲线外凸
       boundaryGap: false,
       data: dates,
       axisLine: { show: false },
@@ -115,6 +160,8 @@ export default function EventTrendChart() {
         fontSize: 11,
         rotate: 0,
         margin: 8,
+        alignMinLabel: 'left',
+        alignMaxLabel: 'right',
         interval: dates.length > 20 ? Math.floor(dates.length / 10) : dates.length > 10 ? 1 : 0,
         formatter: (val: string) => val.slice(5).replace('-', '/'), // show MM/DD
       },
@@ -132,7 +179,9 @@ export default function EventTrendChart() {
       {
         name: '严重',
         type: 'line',
-        smooth: 0.4,
+        smooth: 0.3,
+        smoothMonotone: 'x',
+        clip: true,
         symbol: 'circle',
         symbolSize: 5,
         showSymbol: false,
@@ -145,7 +194,9 @@ export default function EventTrendChart() {
       {
         name: '高危',
         type: 'line',
-        smooth: 0.4,
+        smooth: 0.3,
+        smoothMonotone: 'x',
+        clip: true,
         symbol: 'circle',
         symbolSize: 5,
         showSymbol: false,
@@ -158,7 +209,9 @@ export default function EventTrendChart() {
       {
         name: '中危',
         type: 'line',
-        smooth: 0.4,
+        smooth: 0.3,
+        smoothMonotone: 'x',
+        clip: true,
         symbol: 'circle',
         symbolSize: 5,
         showSymbol: false,
@@ -171,7 +224,9 @@ export default function EventTrendChart() {
       {
         name: '低危',
         type: 'line',
-        smooth: 0.4,
+        smooth: 0.3,
+        smoothMonotone: 'x',
+        clip: true,
         symbol: 'circle',
         symbolSize: 5,
         showSymbol: false,
@@ -187,6 +242,17 @@ export default function EventTrendChart() {
     animationEasing: 'cubicOut',
   }
 
-  return <ReactECharts option={option} style={{ height: '300px' }} opts={{ renderer: 'svg' }} />
+  return (
+    <div>
+      {tabBar}
+      <div className="w-full min-w-0 overflow-hidden" style={{ height: 272 }}>
+        <ReactECharts
+          option={option}
+          style={{ height: '100%', width: '100%' }}
+          opts={{ renderer: 'svg' }}
+        />
+      </div>
+    </div>
+  )
 }
 

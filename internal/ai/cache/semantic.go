@@ -8,6 +8,10 @@ import (
 	"math"
 	"time"
 
+	"Fo-Sentinel-Agent/internal/ai/embedder"
+	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
+	milvus "Fo-Sentinel-Agent/internal/dao/milvus"
+
 	"github.com/cloudwego/eino/components/embedding"
 	einoretriever "github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/schema"
@@ -16,12 +20,9 @@ import (
 	milvuscli "github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 	goredis "github.com/redis/go-redis/v9"
-
-	"Fo-Sentinel-Agent/utility/common"
 )
 
 const (
-	DefaultTopK      = 3 // 默认每次从 Milvus 召回 3 个候选块
 	DefaultTTL       = 24 * time.Hour
 	DefaultThreshold = 0.85
 	DefaultKeyPrefix = "rag:cache"
@@ -31,7 +32,8 @@ const (
 type Config struct {
 	TTL       time.Duration // 单条缓存有效期，到期由 Redis 自动删除
 	Threshold float64       // 余弦相似度命中阈值，取值 (0,1]
-	TopK      int           // Milvus 每次召回的文档数量
+	TopK      int           // Milvus 每次召回的候选文档数量（扩大候选池）
+	FinalTopK int           // 返回给 LLM 的最终文档数（TopK 过滤后再截取，0 表示不截取）
 	KeyPrefix string        // Redis Key 前缀，用于业务隔离
 	MinScore  float64       // 召回结果最低相似度阈值，低于此值的块在返回前被过滤
 }
@@ -73,9 +75,25 @@ func (sc *semanticCache) entryKey(id string) string {
 	return sc.keyPrefix + ":" + id
 }
 
-// get 遍历所有未过期条目，返回余弦相似度 ≥ threshold 的第一条结果及其相似度。
-// GET 返回 Nil（TTL 过期）时顺带清理索引。
+// get 包裹 doGet，记录 RAG_HIT / RAG_MISS 到链路追踪。
 func (sc *semanticCache) get(ctx context.Context, vec []float64) (docs []*schema.Document, sim float64, hit bool) {
+	spanCtx, spanID := aitrace.StartSpan(ctx, aitrace.NodeTypeCache, "RAG_GET")
+	docs, sim, hit = sc.doGet(spanCtx, vec)
+	label := "RAG_MISS"
+	if hit {
+		label = "RAG_HIT"
+	}
+	aitrace.FinishSpan(spanCtx, spanID, nil, map[string]any{
+		"op":  label,
+		"hit": hit,
+		"sim": fmt.Sprintf("%.4f", sim),
+	})
+	return docs, sim, hit
+}
+
+// doGet 遍历所有未过期条目，返回余弦相似度 ≥ threshold 的第一条结果及其相似度。
+// GET 返回 Nil（TTL 过期）时顺带清理索引。
+func (sc *semanticCache) doGet(ctx context.Context, vec []float64) (docs []*schema.Document, sim float64, hit bool) {
 	ids, err := sc.client.SMembers(ctx, sc.indexKey()).Result()
 	if err != nil || len(ids) == 0 {
 		return nil, 0, false
@@ -112,11 +130,21 @@ func (sc *semanticCache) get(ctx context.Context, vec []float64) (docs []*schema
 	return nil, 0, false
 }
 
-// set 写入新条目；写入前做去重检查，避免并发请求产生近似重复条目。
-// Pipeline 原子写入条目和索引，减少一次网络往返。
+// set 包裹 doSet，记录 RAG_SET 到链路追踪。
 func (sc *semanticCache) set(ctx context.Context, vec []float64, docs []*schema.Document) {
+	spanCtx, spanID := aitrace.StartSpan(ctx, aitrace.NodeTypeCache, "RAG_SET")
+	sc.doSet(spanCtx, vec, docs)
+	aitrace.FinishSpan(spanCtx, spanID, nil, map[string]any{
+		"op":        "SET",
+		"doc_count": len(docs),
+	})
+}
+
+// doSet 写入新条目；写入前做去重检查，避免并发请求产生近似重复条目。
+// Pipeline 原子写入条目和索引，减少一次网络往返。
+func (sc *semanticCache) doSet(ctx context.Context, vec []float64, docs []*schema.Document) {
 	if sc.hasSimilar(ctx, vec) {
-		g.Log().Debugf(ctx, "semantic_cache.set: skip, similar entry already exists")
+		g.Log().Debugf(ctx, "[SemanticCache] 近似条目已存在，跳过写入")
 		return
 	}
 
@@ -189,15 +217,17 @@ type Retriever struct {
 	embedder  embedding.Embedder
 	cache     *semanticCache
 	topK      int
+	finalTopK int     // 返回给 LLM 的最终文档数，0 表示全部返回
 	minScore  float64 // 召回结果最低相似度阈值
+	partition string  // 指定检索的分区名，空字符串表示检索全部分区
+	useHybrid bool    // 是否使用 Sparse-Dense 混合检索（BM25 + 语义向量）
 }
 
-// New 创建 Retriever，TopK ≤ 0 时回落到 DefaultTopK，MinScore ≤ 0 时回落到 DefaultMinScore。
+// New 创建 Retriever（稠密检索，全分区），MinScore ≤ 0 时回落到 DefaultMinScore。
+// TopK 和 FinalTopK 由调用方（retriever.readCacheConfig）负责填充默认值。
 func New(cli milvuscli.Client, eb embedding.Embedder, redisCli *goredis.Client, cfg Config) *Retriever {
 	topK := cfg.TopK
-	if topK <= 0 {
-		topK = DefaultTopK
-	}
+	finalTopK := cfg.FinalTopK
 	minScore := cfg.MinScore
 	if minScore <= 0 {
 		minScore = DefaultMinScore
@@ -207,8 +237,18 @@ func New(cli milvuscli.Client, eb embedding.Embedder, redisCli *goredis.Client, 
 		embedder:  eb,
 		cache:     newSemanticCache(redisCli, cfg),
 		topK:      topK,
+		finalTopK: finalTopK,
 		minScore:  minScore,
 	}
+}
+
+// NewWithPartition 创建分区感知的 Retriever，支持 Sparse-Dense 混合检索。
+// partition 为空时检索全部分区，useHybrid=true 时启用 BM25 + 语义向量混合检索。
+func NewWithPartition(cli milvuscli.Client, eb embedding.Embedder, redisCli *goredis.Client, cfg Config, partition string, useHybrid bool) *Retriever {
+	r := New(cli, eb, redisCli, cfg)
+	r.partition = partition
+	r.useHybrid = useHybrid
+	return r
 }
 
 // Retrieve 实现 einoretriever.Retriever 接口。
@@ -226,23 +266,54 @@ func (c *Retriever) Retrieve(ctx context.Context, query string, opts ...einoretr
 		g.Log().Infof(ctx, "[SemanticCache] 缓存命中，跳过 Milvus 检索，直接返回 %d 条文档 | query=%q | 相似度=%.4f | 阈值=%.2f", len(docs), query, sim, c.cache.threshold)
 		return docs, nil
 	}
-	g.Log().Infof(ctx, "[SemanticCache] 缓存未命中，回源 Milvus 检索 | query=%q", query)
+	g.Log().Infof(ctx, "[SemanticCache] 缓存未命中，回源 Milvus 检索 | query=%q | partition=%q | hybrid=%v", query, c.partition, c.useHybrid)
 
-	// float64 → float32，调 Milvus Search
+	var docs []*schema.Document
+	if c.useHybrid {
+		docs, err = c.hybridSearch(ctx, query, queryVec)
+	} else {
+		docs, err = c.denseSearch(ctx, queryVec)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 按相似度阈值过滤低相关块，避免将无关内容送入 LLM 上下文
+	filtered := make([]*schema.Document, 0, len(docs))
+	for _, doc := range docs {
+		if doc.Score() >= c.minScore {
+			filtered = append(filtered, doc)
+		}
+	}
+
+	// 截断到 finalTopK，控制送入 LLM 的 Token 数量
+	if c.finalTopK > 0 && len(filtered) > c.finalTopK {
+		filtered = filtered[:c.finalTopK]
+	}
+	g.Log().Infof(ctx, "[Retriever] Milvus 召回 %d 块，过滤后保留 %d 块（minScore=%.2f，finalTopK=%d）", len(docs), len(filtered), c.minScore, c.finalTopK)
+
+	c.cache.set(ctx, queryVec, filtered)
+	return filtered, nil
+}
+
+// denseSearch 执行单路稠密向量检索。
+func (c *Retriever) denseSearch(ctx context.Context, queryVec []float64) ([]*schema.Document, error) {
 	f32 := make([]float32, len(queryVec))
 	for i, v := range queryVec {
 		f32[i] = float32(v)
 	}
-
 	sp, err := entity.NewIndexAUTOINDEXSearchParam(1)
 	if err != nil {
 		return nil, fmt.Errorf("build search param: %w", err)
 	}
-
+	partitions := []string{}
+	if c.partition != "" {
+		partitions = []string{c.partition}
+	}
 	results, err := c.milvusCli.Search(
 		ctx,
-		common.MilvusCollectionName,
-		[]string{},
+		milvus.CollectionName,
+		partitions,
 		"",
 		[]string{"id", "content", "metadata"},
 		[]entity.Vector{entity.FloatVector(f32)},
@@ -257,23 +328,57 @@ func (c *Retriever) Retrieve(ctx context.Context, query string, opts ...einoretr
 	if len(results) == 0 {
 		return []*schema.Document{}, nil
 	}
+	return parseMilvusResult(results[0])
+}
 
-	docs, err := parseMilvusResult(results[0])
+// hybridSearch 执行 Sparse-Dense 混合检索（BM25 + 语义向量，RRF 融合排序）。
+func (c *Retriever) hybridSearch(ctx context.Context, query string, queryVec []float64) ([]*schema.Document, error) {
+	f32 := make([]float32, len(queryVec))
+	for i, v := range queryVec {
+		f32[i] = float32(v)
+	}
+
+	// 稠密向量 ANN 请求
+	denseSP, err := entity.NewIndexAUTOINDEXSearchParam(1)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build dense search param: %w", err)
+	}
+	denseReq := milvuscli.NewANNSearchRequest("vector", entity.COSINE, "", []entity.Vector{entity.FloatVector(f32)}, denseSP, c.topK)
+
+	// BM25 稀疏向量
+	sparseVec, err := bm25Embed(query)
+	if err != nil {
+		return nil, fmt.Errorf("bm25 embed: %w", err)
+	}
+	sparseSP, err := entity.NewIndexSparseInvertedSearchParam(0.0)
+	if err != nil {
+		return nil, fmt.Errorf("build sparse search param: %w", err)
+	}
+	sparseReq := milvuscli.NewANNSearchRequest("sparse_vector", entity.IP, "", []entity.Vector{sparseVec}, sparseSP, c.topK)
+
+	partitions := []string{}
+	if c.partition != "" {
+		partitions = []string{c.partition}
 	}
 
-	// 按相似度阈值过滤低相关块，避免将无关内容送入 LLM 上下文
-	filtered := make([]*schema.Document, 0, len(docs))
-	for _, doc := range docs {
-		if doc.Score() >= c.minScore {
-			filtered = append(filtered, doc)
-		}
+	results, err := c.milvusCli.HybridSearch(
+		ctx,
+		milvus.CollectionName,
+		partitions,
+		c.topK,
+		[]string{"id", "content", "metadata"},
+		milvuscli.NewRRFReranker(),
+		[]*milvuscli.ANNSearchRequest{denseReq, sparseReq},
+	)
+	if err != nil {
+		// HybridSearch 失败时降级为纯稠密检索
+		g.Log().Warningf(ctx, "[Retriever] HybridSearch 失败，降级为稠密检索: %v", err)
+		return c.denseSearch(ctx, queryVec)
 	}
-	g.Log().Infof(ctx, "[Retriever] Milvus 召回 %d 块，过滤后保留 %d 块（minScore=%.2f）", len(docs), len(filtered), c.minScore)
-
-	c.cache.set(ctx, queryVec, filtered)
-	return filtered, nil
+	if len(results) == 0 {
+		return []*schema.Document{}, nil
+	}
+	return parseMilvusResult(results[0])
 }
 
 // parseMilvusResult 将单条 SearchResult 映射为 []*schema.Document。
@@ -344,4 +449,10 @@ func parseMilvusResult(result milvuscli.SearchResult) ([]*schema.Document, error
 	}
 
 	return docs, nil
+}
+
+// bm25Embed 为 hybrid search 生成 BM25 稀疏向量。
+// 封装 embedder.BM25Embed，将 SparseEmbedding 转为 Milvus Vector 接口。
+func bm25Embed(text string) (entity.Vector, error) {
+	return embedder.BM25Embed(text)
 }

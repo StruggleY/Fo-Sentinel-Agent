@@ -1,6 +1,7 @@
 package cache
 
 import (
+	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 	"Fo-Sentinel-Agent/utility/client"
 	"context"
 	"encoding/json"
@@ -38,6 +39,18 @@ func buildSummaryKey(sessionID string) string {
 //   - {key_prefix}:{sessionID}:recent  → 最近的消息列表（JSON 序列化 []*schema.Message）
 //   - {key_prefix}:{sessionID}:summary → 长期摘要字符串
 func LoadSession(ctx context.Context, sessionID string) (recent []*schema.Message, summary string, err error) {
+	spanCtx, spanID := aitrace.StartSpan(ctx, aitrace.NodeTypeCache, "SESSION_LOAD")
+	recent, summary, err = loadSessionCore(spanCtx, sessionID)
+	aitrace.FinishSpan(spanCtx, spanID, err, map[string]any{
+		"op":           "LOAD",
+		"recent_count": len(recent),
+		"has_summary":  summary != "",
+	})
+	return recent, summary, err
+}
+
+// loadSessionCore 执行实际的 Redis 读取逻辑
+func loadSessionCore(ctx context.Context, sessionID string) ([]*schema.Message, string, error) {
 	loadChatConfig(ctx)
 
 	redisCli, err := client.GetRedisClient(ctx)
@@ -45,6 +58,7 @@ func LoadSession(ctx context.Context, sessionID string) (recent []*schema.Messag
 		return nil, "", fmt.Errorf("get redis client: %w", err)
 	}
 
+	var recent []*schema.Message
 	// 读取最近消息
 	recentKey := buildRecentKey(sessionID)
 	data, err := redisCli.Get(ctx, recentKey).Bytes()
@@ -60,6 +74,7 @@ func LoadSession(ctx context.Context, sessionID string) (recent []*schema.Messag
 	}
 
 	// 读取长期摘要
+	var summary string
 	summaryKey := buildSummaryKey(sessionID)
 	summaryVal, err := redisCli.Get(ctx, summaryKey).Result()
 	if errors.Is(err, goredis.Nil) {
@@ -79,10 +94,21 @@ func LoadSession(ctx context.Context, sessionID string) (recent []*schema.Messag
 func SaveSession(ctx context.Context, sessionID string, recent []*schema.Message, summary string) error {
 	// 如果最近消息和摘要都为空，则不进行写入，避免无效 key 占用
 	if len(recent) == 0 && summary == "" {
-		g.Log().Debugf(ctx, "[Session] skip SaveSession for empty data, session_id=%s", sessionID)
+		g.Log().Debugf(ctx, "[Session] 数据为空，跳过保存 | session=%s", sessionID)
 		return nil
 	}
 
+	spanCtx, spanID := aitrace.StartSpan(ctx, aitrace.NodeTypeCache, "SESSION_SAVE")
+	err := saveSessionCore(spanCtx, sessionID, recent, summary)
+	aitrace.FinishSpan(spanCtx, spanID, err, map[string]any{
+		"op":           "SAVE",
+		"recent_count": len(recent),
+	})
+	return err
+}
+
+// saveSessionCore 执行实际的 Redis 写入逻辑
+func saveSessionCore(ctx context.Context, sessionID string, recent []*schema.Message, summary string) error {
 	if err := SaveRecentMessages(ctx, sessionID, recent); err != nil {
 		return err
 	}
@@ -92,13 +118,21 @@ func SaveSession(ctx context.Context, sessionID string, recent []*schema.Message
 	return nil
 }
 
+// shortID 取 sessionID 前 8 位，用于 span 名称防止过长
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
 // SaveRecentMessages 仅将最近消息列表保存到 Redis。
 // 空的 recent 会被跳过，不写入 Redis。
 func SaveRecentMessages(ctx context.Context, sessionID string, recent []*schema.Message) error {
 	loadChatConfig(ctx)
 
 	if len(recent) == 0 {
-		g.Log().Debugf(ctx, "[Session] skip SaveRecentMessages for empty recent, session_id=%s", sessionID)
+		g.Log().Debugf(ctx, "[Session] 消息列表为空，跳过保存 | session=%s", sessionID)
 		return nil
 	}
 
@@ -125,7 +159,7 @@ func SaveSummary(ctx context.Context, sessionID string, summary string) error {
 	loadChatConfig(ctx)
 
 	if summary == "" {
-		g.Log().Debugf(ctx, "[Session] skip SaveSummary for empty summary, session_id=%s", sessionID)
+		g.Log().Debugf(ctx, "[Session] 摘要为空，跳过保存 | session=%s", sessionID)
 		return nil
 	}
 

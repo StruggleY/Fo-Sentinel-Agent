@@ -1,6 +1,7 @@
 package chat_pipeline
 
 import (
+	"Fo-Sentinel-Agent/internal/ai/prompt/memory"
 	"Fo-Sentinel-Agent/internal/ai/token"
 	"context"
 	"strings"
@@ -92,17 +93,11 @@ func summarizeOldHistory(ctx context.Context, oldMessages []*schema.Message) (st
 		historyText.WriteString(role + ": " + msg.Content + "\n")
 	}
 
-	// 摘要 Prompt：引导模型提炼关键信息，保留用户意图和结论
-	summaryPrompt := `请将以下对话历史压缩成一段不超过200字的简洁摘要，要求：
-1. 保留关键信息、用户意图、重要结论
-2. 省略无关细节和重复内容
-3. 输出纯文本，不要 Markdown 格式
-
-对话历史：
-` + historyText.String()
-
-	// 单次 LLM 调用（Generate 而非 Stream），无工具调用
-	msgs := []*schema.Message{schema.UserMessage(summaryPrompt)}
+	// 摘要 Prompt：System 注入角色上下文（安全领域记忆压缩器），User 提供具体压缩指令
+	msgs := []*schema.Message{
+		schema.SystemMessage(memory.SummarySystem),
+		schema.UserMessage(memory.ChatInlineCompress + historyText.String()),
+	}
 	out, err := model.Generate(ctx, msgs)
 	if err != nil {
 		return "", err

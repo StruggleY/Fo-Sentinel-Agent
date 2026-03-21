@@ -5,7 +5,7 @@ package eventsvc
 import (
 	"context"
 
-	"Fo-Sentinel-Agent/internal/dao"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"Fo-Sentinel-Agent/internal/service/pipeline"
 
 	"github.com/google/uuid"
@@ -37,6 +37,16 @@ func UpdateStatus(ctx context.Context, id, status string) error {
 	return dao.UpdateEventStatus(ctx, id, status)
 }
 
+// BatchDelete 批量软删除安全事件。
+func BatchDelete(ctx context.Context, ids []string) error {
+	return dao.BatchDeleteEvents(ctx, ids)
+}
+
+// BatchUpdateStatus 批量更新事件状态。
+func BatchUpdateStatus(ctx context.Context, ids []string, status string) error {
+	return dao.BatchUpdateEventStatus(ctx, ids, status)
+}
+
 // Delete 软删除安全事件（保留历史数据）。
 func Delete(ctx context.Context, id string) error {
 	return dao.DeleteEvent(ctx, id)
@@ -57,6 +67,7 @@ func Create(ctx context.Context, title, content, severity, source, cveID string,
 		ID:        uuid.New().String(),
 		Title:     title,
 		Content:   content,
+		EventType: "manual", // 手动创建的事件来源标识，区别于 rss/github/web
 		Severity:  severity,
 		Source:    source,
 		Status:    "new", // 手动创建的事件默认待处理
