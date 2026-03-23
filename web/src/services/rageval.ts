@@ -4,21 +4,17 @@ export interface TrendPoint {
   timestamp: string
   success_rate: number
   avg_latency_ms: number
-  no_doc_rate: number
 }
 
 export interface DashboardMetrics {
   success_rate: number
   avg_latency_ms: number
   p95_latency_ms: number
-  cache_hit_rate: number
-  no_doc_rate: number
   total_runs: number
   avg_retrieved_docs: number  // P1
   avg_top_score: number       // P1
   success_rate_status: 'good' | 'warning' | 'bad'
   latency_status: 'good' | 'warning' | 'bad'
-  no_doc_rate_status: 'good' | 'warning' | 'bad'
   trends: TrendPoint[]
 }
 
@@ -28,10 +24,8 @@ export interface TraceItem {
   session_id: string
   status: string
   duration_ms: number
-  cache_hit: boolean
-  no_doc: boolean
   start_time: string
-  feedback_vote: number  // P2: 0=无 1=赞 -1=踩
+  feedback_vote: number  // 0=无 1=赞 -1=踩
 }
 
 // P0: Trace 节点树
@@ -101,16 +95,12 @@ export const ragevalService = {
     page?: number
     pageSize?: number
     status?: string
-    noDoc?: string
-    cacheHit?: string
   }): Promise<{ list: TraceItem[]; total: number }> {
     const res = await api.get<ApiWrap<{ list: TraceItem[]; total: number }>>('/rageval/v1/traces', {
       params: {
         page: params?.page ?? 1,
         page_size: params?.pageSize ?? 5,
         status: params?.status ?? '',
-        no_doc: params?.noDoc ?? '',
-        cache_hit: params?.cacheHit ?? '',
       },
     })
     return { list: res.data.data?.list ?? [], total: res.data.data?.total ?? 0 }

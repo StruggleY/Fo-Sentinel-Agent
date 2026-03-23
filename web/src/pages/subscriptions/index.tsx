@@ -21,6 +21,7 @@ import AddSubscriptionModal from './components/AddSubscriptionModal'
 import { subscriptionService } from '@/services/subscription'
 import type { Subscription } from '@/types'
 import toast from 'react-hot-toast'
+import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 
 const sourceTypeIcons: Record<string, typeof Github> = {
   github_repo: Github,
@@ -196,16 +197,16 @@ export default function Subscriptions() {
               className="input pl-9 w-44"
             />
           </div>
-          <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="select w-32">
-            <option value="all">全部类型</option>
-            <option value="github_repo">GitHub</option>
-            <option value="rss">RSS</option>
-          </select>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="select w-28">
-            <option value="all">全部状态</option>
-            <option value="active">运行中</option>
-            <option value="paused">已暂停</option>
-          </select>
+          <CustomSelect value={filterType} onChange={v => setFilterType(v)} className="w-32" options={[
+            { value: 'all', label: '全部类型' },
+            { value: 'github_repo', label: 'GitHub' },
+            { value: 'rss', label: 'RSS' },
+          ] satisfies SelectOption[]} />
+          <CustomSelect value={filterStatus} onChange={v => setFilterStatus(v)} className="w-28" options={[
+            { value: 'all', label: '全部状态' },
+            { value: 'active', label: '运行中' },
+            { value: 'paused', label: '已暂停' },
+          ] satisfies SelectOption[]} />
           <button onClick={fetchSubscriptions} disabled={loading} className="btn-default" title="刷新">
             <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
           </button>

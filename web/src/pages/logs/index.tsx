@@ -13,6 +13,7 @@ import { cn, formatDate } from '@/utils'
 import { subscriptionService } from '@/services/subscription'
 import type { Subscription, FetchLog } from '@/types'
 import toast from 'react-hot-toast'
+import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 
 const sourceTypeLabels: Record<string, string> = {
   github_repo: 'GitHub',
@@ -121,21 +122,19 @@ export default function Logs() {
       <div className="card card-body">
         <div className="flex items-center gap-4">
           <label className="text-sm text-gray-600">选择订阅：</label>
-          <select
+          <CustomSelect
             value={selectedSubscriptionId || ''}
-            onChange={(e) => {
-              setSelectedSubscriptionId(e.target.value || null)
+            onChange={v => {
+              setSelectedSubscriptionId(v || null)
               setPage(1)
             }}
-            className="select flex-1 max-w-md"
-          >
-            <option value="">请选择订阅源</option>
-            {subscriptions.map((sub) => (
-              <option key={sub.id} value={sub.id}>
-                {sub.name} ({sourceTypeLabels[sub.source_type] || sub.source_type})
-              </option>
-            ))}
-          </select>
+            className="flex-1 max-w-md"
+            placeholder="请选择订阅源"
+            options={subscriptions.map(sub => ({
+              value: String(sub.id),
+              label: `${sub.name} (${sourceTypeLabels[sub.source_type] || sub.source_type})`,
+            }))}
+          />
           {selectedSubscriptionId && (
             <button
               onClick={fetchLogs}
@@ -222,16 +221,17 @@ export default function Logs() {
               </div>
 
               {/* Status Filter */}
-              <select
+              <CustomSelect
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="select w-32"
-              >
-                <option value="all">全部状态</option>
-                <option value="success">成功</option>
-                <option value="failed">失败</option>
-                <option value="timeout">超时</option>
-              </select>
+                onChange={v => setStatusFilter(v)}
+                className="w-32"
+                options={[
+                  { value: 'all', label: '全部状态' },
+                  { value: 'success', label: '成功' },
+                  { value: 'failed', label: '失败' },
+                  { value: 'timeout', label: '超时' },
+                ] satisfies SelectOption[]}
+              />
             </div>
           </div>
 

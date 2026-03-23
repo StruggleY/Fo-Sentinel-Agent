@@ -85,6 +85,15 @@ export default function Chat() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state])
 
+  // 组件卸载时清理：不中止请求，只清理引用
+  useEffect(() => {
+    return () => {
+      // 不调用 abort()，让后端完成执行
+      abortControllerRef.current = null
+      loadingStreamRef.current = null
+    }
+  }, [])
+
   // ── 会话管理 ─────────────────────────────────────────────────────────────
   const loadMessages = (sid: string) => {
     const raw = localStorage.getItem(`chat_messages_${sid}`)
@@ -249,8 +258,11 @@ export default function Chat() {
 
     try {
       // 始终走多智能体（意图识别路由），deepThinking 为深度思考模式
+      // messageIndex 是 assistant 消息在数组中的索引（messages 已包含 user + assistant）
+      const messageIndex = messages.length + 1
       chatService.multiAgentChat(
         messageContent,
+        messageIndex,
         deepThinking,
         webSearch,
         (agent, content) => {
@@ -360,15 +372,25 @@ export default function Chat() {
 
   // ── 消息反馈 ──────────────────────────────────────────────────────────────
   const submitFeedback = async (messageIndex: number, vote: 1 | -1) => {
+    if (!currentSessionId) {
+      console.warn('submitFeedback: currentSessionId is empty')
+      return
+    }
     // toggle：再次点击同一个按钮 → 取消反馈
     const current = votes[messageIndex]
     const newVote = current === vote ? 0 : vote
-    setVotes(prev => {
-      const next = { ...prev }
-      if (newVote === 0) delete next[messageIndex]
-      else next[messageIndex] = newVote as 1 | -1
-      return next
-    })
+    const nextVotes = { ...votes }
+    if (newVote === 0) delete nextVotes[messageIndex]
+    else nextVotes[messageIndex] = newVote as 1 | -1
+
+    setVotes(nextVotes)
+    // 立即同步到 localStorage
+    if (Object.keys(nextVotes).length > 0) {
+      localStorage.setItem(`chat_votes_${currentSessionId}`, JSON.stringify(nextVotes))
+    } else {
+      localStorage.removeItem(`chat_votes_${currentSessionId}`)
+    }
+
     try {
       await ragevalService.submitFeedback(currentSessionId, messageIndex, newVote as 1 | -1 | 0)
     } catch {
@@ -435,7 +457,7 @@ export default function Chat() {
               ref={chatScrollRef}
               className="relative flex-1 min-h-0 overflow-y-auto chat-sidebar-scroll"
             >
-              <div className="max-w-[760px] ml-[max(32px,calc(50vw-660px))] px-6 py-8 space-y-2">
+              <div className="max-w-[760px] ml-[max(32px,calc(50vw-660px))] px-6 py-8 space-y-6">
                 {messages.map((m, i) => (
                   <MessageBubble
                     key={m.id}
@@ -490,7 +512,7 @@ interface MessageBubbleProps {
 function MessageBubble({ message, isLast, messageIndex, vote, onVote }: MessageBubbleProps) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end mb-4">
+      <div className="flex justify-end mb-6">
         <div
           className="max-w-[72%] rounded-3xl rounded-br-lg px-5 py-3 text-sm leading-relaxed text-white"
           style={{
@@ -506,7 +528,7 @@ function MessageBubble({ message, isLast, messageIndex, vote, onVote }: MessageB
 
   // assistant
   return (
-    <div className="flex items-start gap-3 mb-4">
+    <div className="flex items-start gap-3 mb-6">
       {/* AI 头像 */}
       <div
         className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white mt-1"

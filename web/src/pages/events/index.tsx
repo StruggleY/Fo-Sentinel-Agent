@@ -24,6 +24,7 @@ import EventDetailModal from './components/EventDetailModal'
 import type { SecurityEvent } from '@/types'
 import { eventService } from '@/services/event'
 import toast from 'react-hot-toast'
+import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 
 type SortField = 'severity' | 'source' | 'created_at'
 
@@ -208,17 +209,18 @@ export default function Events() {
               className="input pl-9 w-52"
             />
           </div>
-          <select
+          <CustomSelect
             value={severityFilter}
-            onChange={e => { setSeverityFilter(e.target.value); setPage(1) }}
-            className="select w-28"
-          >
-            <option value="all">全部级别</option>
-            <option value="critical">严重</option>
-            <option value="high">高危</option>
-            <option value="medium">中危</option>
-            <option value="low">低危</option>
-          </select>
+            onChange={v => { setSeverityFilter(v); setPage(1) }}
+            className="w-28"
+            options={[
+              { value: 'all', label: '全部级别' },
+              { value: 'critical', label: '严重' },
+              { value: 'high', label: '高危' },
+              { value: 'medium', label: '中危' },
+              { value: 'low', label: '低危' },
+            ] satisfies SelectOption[]}
+          />
           <button onClick={fetchEvents} disabled={loading} className="btn-default">
             <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
             刷新

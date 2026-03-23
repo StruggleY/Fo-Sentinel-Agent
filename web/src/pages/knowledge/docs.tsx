@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Upload, Trash2, RefreshCw, Loader2, FileText, Layers,
-  CheckCircle2, XCircle, Clock, Search, X,
+  CheckCircle2, XCircle, Clock, Search,
   Inbox, RotateCcw, ChevronRight, Filter, Timer,
 } from 'lucide-react'
 import { cn } from '@/utils'
@@ -12,6 +12,7 @@ import Pagination from '@/components/common/Pagination'
 import DocUploadModal from './components/DocUploadModal'
 import RebuildModal from './components/RebuildModal'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
+import CustomSelect from '@/components/common/CustomSelect'
 import toast from 'react-hot-toast'
 
 const STATUS_CONFIG = {
@@ -252,33 +253,29 @@ export default function KnowledgeDocs() {
             {searchInput && (
               <button
                 onClick={() => { setSearchInput(''); setSearch(''); setPage(1) }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-100"
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100"
               >
-                <X className="w-3 h-3 text-gray-400" />
+                清除
               </button>
             )}
           </div>
 
           {/* 状态过滤 */}
-          <div className="relative">
-            <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-            <select
-              value={statusFilter}
-              onChange={e => handleStatusChange(e.target.value)}
-              className="pl-8 pr-3 h-9 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
-            >
-              {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
+          <CustomSelect
+            value={statusFilter}
+            onChange={handleStatusChange}
+            options={STATUS_OPTIONS}
+            className="w-32"
+            prefix={<Filter className="w-3.5 h-3.5" />}
+          />
 
           {/* 文件类型过滤 */}
-          <select
+          <CustomSelect
             value={fileTypeFilter}
-            onChange={e => handleFileTypeChange(e.target.value)}
-            className="px-3 h-9 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
-          >
-            {FILE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+            onChange={handleFileTypeChange}
+            options={FILE_TYPE_OPTIONS}
+            className="w-28"
+          />
 
           {/* 清除过滤 */}
           {hasActiveFilters && (
@@ -327,8 +324,8 @@ export default function KnowledgeDocs() {
               批量删除
             </button>
           </div>
-          <button onClick={() => setSelected(new Set())} className="ml-auto text-gray-400 hover:text-gray-600">
-            <X className="w-4 h-4" />
+          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-gray-500 hover:text-gray-700 underline">
+            取消选择
           </button>
         </div>
       )}

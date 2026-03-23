@@ -61,7 +61,7 @@ func (c *ControllerV1) FileUpload(ctx context.Context, req *v1.FileUploadReq) (*
 	}
 
 	// 启动链路追踪（文件验证通过后再启动，避免记录无效请求）
-	ctx = trace.StartRun(ctx, "chat.file_upload", "/api/chat/v1/file_upload", "",
+	ctx = trace.StartRun(ctx, "chat.file_upload", "/api/chat/v1/file_upload", "", 0,
 		uploadFile.Filename, map[string]any{"file_size": uploadFile.Size})
 	var uploadErr error
 	defer func() { trace.FinishRun(ctx, uploadErr) }()
@@ -130,9 +130,19 @@ func (c *ControllerV1) FileUpload(ctx context.Context, req *v1.FileUploadReq) (*
 // │  SSE 事件：status + plan_step（中间步骤）+ plan（最终答案）                      │
 // └─────────────────────────────────────────────────────────────────────────────────┘
 func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, error) {
-	// 启动链路追踪（新增）
+	// 确保 query 不为空（防止前端传空字符串绕过验证）
+	if req.Query == "" {
+		g.Log().Warningf(ctx, "[Chat] 收到空查询 | session_id=%s", req.SessionId)
+		return nil, gerror.New("查询内容不能为空")
+	}
+
+	// 记录查询内容
+	g.Log().Debugf(ctx, "[Chat] 收到请求 | session_id=%s | query=%s | deep_thinking=%v",
+		req.SessionId, req.Query[:min(50, len(req.Query))], req.DeepThinking)
+
+	// 启动链路追踪
 	tags := map[string]any{"deep_thinking": req.DeepThinking}
-	ctx = trace.StartRun(ctx, "chat.intent", "/api/chat/v1/intent", req.SessionId, req.Query, tags)
+	ctx = trace.StartRun(ctx, "chat.intent", "/api/chat/v1/intent", req.SessionId, req.MessageIndex, req.Query, tags)
 	var execErr error
 	defer func() { trace.FinishRun(ctx, execErr) }()
 

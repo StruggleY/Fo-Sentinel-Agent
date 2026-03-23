@@ -11,6 +11,7 @@ import { cn, formatDate } from '@/utils'
 import type { SecurityEvent } from '@/types'
 import { eventService } from '@/services/event'
 import toast from 'react-hot-toast'
+import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 
 interface EventDetailModalProps {
   event: SecurityEvent | null
@@ -182,17 +183,17 @@ export default function EventDetailModal({ event, onClose, onUpdate }: EventDeta
 
         {/* Footer Actions */}
         <div className="modal-footer">
-          <select
+          <CustomSelect
             value={currentStatus}
-            onChange={(e) => handleUpdateStatus(e.target.value)}
-            disabled={updatingStatus}
-            className="select w-32 h-8"
-          >
-            <option value="new">新建</option>
-            <option value="processing">处理中</option>
-            <option value="resolved">已解决</option>
-            <option value="ignored">已忽略</option>
-          </select>
+            onChange={v => handleUpdateStatus(v)}
+            className="w-32"
+            options={[
+              { value: 'new', label: '新建' },
+              { value: 'processing', label: '处理中' },
+              { value: 'resolved', label: '已解决' },
+              { value: 'ignored', label: '已忽略' },
+            ] satisfies SelectOption[]}
+          />
           <div className="flex-1" />
           <button onClick={onClose} className="btn-default">
             关闭

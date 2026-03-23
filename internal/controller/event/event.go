@@ -143,8 +143,9 @@ func (c *ControllerV1) BatchUpdateStatus(ctx context.Context, req *v1.BatchUpdat
 
 // PipelineStream 触发 Event Analysis Agent（ReAct 智能体）进行流式事件分析，SSE 逐 chunk 推送结果。
 func (c *ControllerV1) PipelineStream(ctx context.Context, req *v1.PipelineStreamReq) (*v1.PipelineStreamRes, error) {
-	// 启动链路追踪
-	ctx = trace.StartRun(ctx, "event.pipeline", "/api/event/v1/pipeline/stream", "", req.Query, nil)
+	// 启动链路追踪（标记为独立事件分析，非会话内操作）
+	tags := map[string]any{"context": "standalone_event_analysis"}
+	ctx = trace.StartRun(ctx, "event.pipeline", "/api/event/v1/pipeline/stream", "", 0, req.Query, tags)
 	var pipelineErr error
 	defer func() { trace.FinishRun(ctx, pipelineErr) }()
 

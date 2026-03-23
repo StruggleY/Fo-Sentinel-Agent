@@ -17,6 +17,9 @@ import {
   Zap,
   Server,
   Bot,
+  MessageSquare,
+  Download,
+  ArrowUpDown,
 } from 'lucide-react'
 import { cn } from '@/utils'
 import { traceService, type TraceNode } from '@/services/trace'
@@ -33,13 +36,15 @@ const nodeTypeConfig: Record<string, {
   bgClass: string
   barColor: string
 }> = {
-  LLM:       { label: 'LLM',      icon: Cpu,      textClass: 'text-violet-700', bgClass: 'bg-violet-50 border-violet-200',  barColor: '#7c3aed' },
-  AGENT:     { label: 'Agent',    icon: Bot,      textClass: 'text-indigo-700', bgClass: 'bg-indigo-50 border-indigo-200',  barColor: '#4f46e5' },
-  LAMBDA:    { label: 'Lambda',   icon: Layers,   textClass: 'text-gray-600',   bgClass: 'bg-gray-50 border-gray-200',      barColor: '#9ca3af' },
-  TOOL:      { label: 'Tool',     icon: Wrench,   textClass: 'text-blue-700',   bgClass: 'bg-blue-50 border-blue-200',      barColor: '#2563eb' },
-  EMBEDDING: { label: 'Embedding',icon: Sparkles, textClass: 'text-pink-700',   bgClass: 'bg-pink-50 border-pink-200',      barColor: '#db2777' },
-  RETRIEVER: { label: 'Milvus',   icon: Database, textClass: 'text-emerald-700',bgClass: 'bg-emerald-50 border-emerald-200',barColor: '#059669' },
-  CACHE:     { label: 'Cache',    icon: Server,   textClass: 'text-cyan-700',   bgClass: 'bg-cyan-50 border-cyan-200',      barColor: '#0891b2' },
+  LLM:       { label: 'LLM',      icon: Cpu,         textClass: 'text-violet-700', bgClass: 'bg-violet-50 border-violet-200',  barColor: '#7c3aed' },
+  AGENT:     { label: 'Agent',    icon: Bot,         textClass: 'text-indigo-700', bgClass: 'bg-indigo-50 border-indigo-200',  barColor: '#4f46e5' },
+  LAMBDA:    { label: 'Lambda',   icon: Layers,      textClass: 'text-gray-600',   bgClass: 'bg-gray-50 border-gray-200',      barColor: '#9ca3af' },
+  TOOL:      { label: 'Tool',     icon: Wrench,      textClass: 'text-blue-700',   bgClass: 'bg-blue-50 border-blue-200',      barColor: '#2563eb' },
+  EMBEDDING: { label: 'Embedding',icon: Sparkles,    textClass: 'text-pink-700',   bgClass: 'bg-pink-50 border-pink-200',      barColor: '#db2777' },
+  RETRIEVER: { label: 'Milvus',   icon: Database,    textClass: 'text-emerald-700',bgClass: 'bg-emerald-50 border-emerald-200',barColor: '#059669' },
+  RERANK:    { label: 'Rerank',   icon: ArrowUpDown, textClass: 'text-amber-700',  bgClass: 'bg-amber-50 border-amber-200',    barColor: '#d97706' },
+  CACHE:     { label: 'Cache',    icon: Server,      textClass: 'text-cyan-700',   bgClass: 'bg-cyan-50 border-cyan-200',      barColor: '#0891b2' },
+  DB:        { label: 'MySQL',    icon: Database,    textClass: 'text-orange-700', bgClass: 'bg-orange-50 border-orange-200',  barColor: '#ea580c' },
 }
 
 const statusBadge: Record<string, { label: string; cls: string; icon: typeof CheckCircle2 }> = {
@@ -213,9 +218,9 @@ function NodeRow({ node, traceStartMs, totalMs, isTopSlowest, isCritical, selfTi
           <TimelineBar node={node} traceStartMs={traceStartMs} totalMs={totalMs} />
         </div>
 
-        {/* Token（LLM 专属） */}
+        {/* Token（LLM/Embedding/Rerank） */}
         <span className="text-xs text-gray-400 w-36 text-right flex-shrink-0 tabular-nums">
-          {node.nodeType === 'LLM' && (
+          {(node.nodeType === 'LLM' || node.nodeType === 'EMBEDDING' || node.nodeType === 'RERANK') && (
             <>
               {node.inputTokens ? <span className="text-blue-500">↑{node.inputTokens}</span> : null}
               {node.outputTokens ? <span className="text-violet-500 ml-1">↓{node.outputTokens}</span> : null}
@@ -238,16 +243,7 @@ function NodeRow({ node, traceStartMs, totalMs, isTopSlowest, isCritical, selfTi
               <div className="flex flex-wrap gap-4">
                 {(node.inputTokens ?? 0) > 0 && <p><span className="text-gray-400">输入：</span><span className="text-blue-600 font-medium">{node.inputTokens}</span></p>}
                 {(node.outputTokens ?? 0) > 0 && <p><span className="text-gray-400">输出：</span><span className="text-violet-600 font-medium">{node.outputTokens}</span></p>}
-                {(node.cachedTokens ?? 0) > 0 && <p><span className="text-gray-400">缓存：</span><span className="text-emerald-600 font-medium">{node.cachedTokens}</span></p>}
-                {/* LLM 缓存 Token 占比 */}
-                {(node.inputTokens ?? 0) > 0 && (node.cachedTokens ?? 0) > 0 && (
-                  <p>
-                    <span className="text-gray-400">缓存节省：</span>
-                    <span className="text-emerald-600 font-medium">
-                      {((node.cachedTokens! / node.inputTokens!) * 100).toFixed(1)}%
-                    </span>
-                  </p>
-                )}
+                {(node.costCny ?? 0) > 0 && <p><span className="text-gray-400">成本：</span><span className="text-emerald-600 font-medium">¥{node.costCny.toFixed(4)}</span></p>}
               </div>
               {node.completionText && (
                 <div>
@@ -260,11 +256,25 @@ function NodeRow({ node, traceStartMs, totalMs, isTopSlowest, isCritical, selfTi
             </div>
           )}
 
+          {(node.nodeType === 'EMBEDDING' || node.nodeType === 'RERANK') && (
+            <div className="space-y-2 text-gray-600">
+              {node.modelName && (
+                <p><span className="text-gray-400 mr-1">模型：</span>{node.modelName}</p>
+              )}
+              <div className="flex flex-wrap gap-4">
+                {(node.inputTokens ?? 0) > 0 && <p><span className="text-gray-400">输入：</span><span className="text-blue-600 font-medium">{node.inputTokens}</span></p>}
+                {(node.costCny ?? 0) > 0 && <p><span className="text-gray-400">成本：</span><span className="text-emerald-600 font-medium">¥{node.costCny.toFixed(4)}</span></p>}
+              </div>
+            </div>
+          )}
+
           {node.nodeType === 'RETRIEVER' && (
             <div className="space-y-2 text-gray-600">
               {node.queryText && <p><span className="text-gray-400">查询：</span>{node.queryText}</p>}
               <div className="flex gap-4">
-                {(node.finalTopK ?? 0) > 0 && <p><span className="text-gray-400">文档数：</span>{node.finalTopK}</p>}
+                {node.finalTopK !== undefined && node.finalTopK !== null && (
+                  <p><span className="text-gray-400">文档数：</span>{node.finalTopK}</p>
+                )}
                 <p>
                   <span className="text-gray-400">缓存命中：</span>
                   <span className={node.cacheHit ? 'text-emerald-600' : 'text-gray-400'}>
@@ -366,6 +376,8 @@ export default function TraceDetail() {
   const [data, setData] = useState<Awaited<ReturnType<typeof traceService.detail>> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [activeTab, setActiveTab] = useState<'nodes'>('nodes')
+  const [exportLoading, setExportLoading] = useState(false)
 
   useEffect(() => {
     if (!traceId) return
@@ -469,9 +481,6 @@ export default function TraceDetail() {
               <span className="text-blue-600">{data.totalInputTokens}</span>
               <span className="text-gray-300 mx-1">/</span>
               <span className="text-violet-600">{data.totalOutputTokens}</span>
-              {data.totalCachedTokens > 0 && (
-                <span className="text-emerald-500 text-xs ml-1">(缓存 {data.totalCachedTokens})</span>
-              )}
             </p>
           </div>
           <div>
@@ -511,7 +520,38 @@ export default function TraceDetail() {
 
       </div>
 
-      {/* 节点时间轴 */}
+      {/* Tab 导航 */}
+      <div className="flex items-center gap-1 border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab('nodes')}
+          className={cn(
+            'flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+            activeTab === 'nodes'
+              ? 'border-indigo-500 text-indigo-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700',
+          )}
+        >
+          <Activity className="w-4 h-4" />
+          节点树
+        </button>
+        <button
+          onClick={async () => {
+            if (exportLoading || !traceId) return
+            setExportLoading(true)
+            try { await traceService.export(traceId) } catch { /* silent */ }
+            finally { setExportLoading(false) }
+          }}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 transition-colors ml-auto"
+        >
+          {exportLoading
+            ? <Loader2 className="w-4 h-4 animate-spin" />
+            : <Download className="w-4 h-4" />}
+          导出 JSON
+        </button>
+      </div>
+
+      {/* 节点树 Tab */}
+      {activeTab === 'nodes' && (
       <div className="card flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* 表头 */}
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 flex-shrink-0">
@@ -577,6 +617,7 @@ export default function TraceDetail() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }

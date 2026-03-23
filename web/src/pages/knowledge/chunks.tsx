@@ -2,13 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ChevronRight, Layers, RefreshCw, Loader2,
-  Hash, AlignLeft, Inbox, ChevronDown, ChevronUp, X,
+  Hash, AlignLeft, Inbox, ChevronDown, ChevronUp,
   Search, FlaskConical,
 } from 'lucide-react'
 import { cn } from '@/utils'
 import { knowledgeService, type KnowledgeBase, type DocItem, type ChunkItem, type SearchResultItem } from '@/services/knowledge'
 import StatCard from '@/components/common/StatCard'
 import Pagination from '@/components/common/Pagination'
+import CustomSelect from '@/components/common/CustomSelect'
 import toast from 'react-hot-toast'
 
 // ── RAG 检索测试模态框 ──────────────────────────────────────────────────────────
@@ -51,11 +52,7 @@ function SearchModal({ baseID, onClose }: SearchModalProps) {
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">直接查询向量库，验证召回效果</p>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
-            <X className="w-4 h-4 text-gray-500" />
-          </button>
         </div>
-
         {/* 查询输入区 */}
         <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0 space-y-3">
           <div>
@@ -72,13 +69,12 @@ function SearchModal({ baseID, onClose }: SearchModalProps) {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <label className="text-sm text-gray-600">召回数量 Top-K</label>
-              <select
+              <CustomSelect
                 value={topK}
-                onChange={e => setTopK(Number(e.target.value))}
-                className="px-2 py-1 border border-gray-200 rounded text-sm"
-              >
-                {[3, 5, 8, 10, 15, 20].map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
+                onChange={v => setTopK(Number(v))}
+                options={[3, 5, 8, 10, 15, 20].map(n => ({ value: n, label: String(n) }))}
+                className="w-20"
+              />
             </div>
             <button
               onClick={handleSearch}
@@ -295,9 +291,9 @@ export default function KnowledgeChunks() {
             {keywordInput && (
               <button
                 onClick={() => { setKeywordInput(''); setKeyword(''); setPage(1) }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-100"
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100"
               >
-                <X className="w-3 h-3 text-gray-400" />
+                清除
               </button>
             )}
           </div>
@@ -357,8 +353,8 @@ export default function KnowledgeChunks() {
               批量禁用
             </button>
           </div>
-          <button onClick={() => setSelected(new Set())} className="ml-auto text-gray-400 hover:text-gray-600">
-            <X className="w-4 h-4" />
+          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-gray-500 hover:text-gray-700 underline">
+            取消选择
           </button>
         </div>
       )}

@@ -42,32 +42,31 @@ interface NavGroup {
 
 const navGroups: NavGroup[] = [
   {
-    title: 'AI 工作台',
+    title: 'AI 能力',
     accent: '#818CF8',
     items: [
       { path: '/chat', icon: MessageSquare, label: 'RAG 智能对话' },
-      { path: '/events/analysis', icon: Cpu, label: 'Multi-Agent 分析' },
+      { path: '/events/analysis', icon: Cpu, label: 'Agent 分析' },
       { path: '/knowledge', icon: LibraryBig, label: 'AI 知识库' },
     ],
   },
   {
-    title: '安全运营',
-    accent: '#34D399',
+    title: '数据管理',
+    accent: '#60A5FA',
     items: [
-      { path: '/dashboard', icon: LayoutDashboard, label: '仪表盘', exact: true },
-      { path: '/subscriptions', icon: Rss, label: '订阅管理' },
+      { path: '/subscriptions', icon: Rss, label: '情报订阅' },
       { path: '/events', icon: ShieldAlert, label: '安全事件', exact: true },
       { path: '/reports', icon: FileText, label: '分析报告' },
+      { path: '/term-mapping', icon: BookMarked, label: '术语映射' },
     ],
   },
   {
-    title: '平台管理',
-    accent: '#60A5FA',
-    defaultCollapsed: false,
+    title: '系统监控',
+    accent: '#34D399',
     items: [
-      { path: '/rag-eval', icon: FlaskConical, label: 'RAG 质量评估' },
-      { path: '/traces', icon: Activity, label: 'Agent Trace' },
-      { path: '/term-mapping', icon: BookMarked, label: '术语规则' },
+      { path: '/dashboard', icon: LayoutDashboard, label: '系统概览', exact: true },
+      { path: '/traces', icon: Activity, label: '链路追踪' },
+      { path: '/rag-eval', icon: FlaskConical, label: 'RAG 评估' },
       { path: '/settings', icon: Settings, label: '系统设置' },
     ],
   },
@@ -205,32 +204,48 @@ export default function Sidebar() {
               {!sidebarCollapsed && (
                 <button
                   onClick={() => toggleGroup(group.title)}
-                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-md mb-0.5 transition-colors hover:bg-white/5 group"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg mb-1 transition-all hover:bg-white/5 group"
                 >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="relative w-2 h-2 flex-shrink-0 transition-all duration-300"
                       style={{
-                        background: group.accent,
-                        opacity: groupHasActive ? 1 : 0.45,
-                        boxShadow: groupHasActive ? `0 0 6px ${group.accent}` : 'none',
+                        opacity: groupHasActive ? 1 : 0.5,
                       }}
-                    />
+                    >
+                      <span
+                        className="absolute inset-0 rounded-sm"
+                        style={{
+                          background: `linear-gradient(135deg, ${group.accent}, ${group.accent}dd)`,
+                          boxShadow: groupHasActive ? `0 0 12px ${group.accent}88, 0 0 4px ${group.accent}` : 'none',
+                        }}
+                      />
+                      {groupHasActive && (
+                        <span
+                          className="absolute inset-0 rounded-sm animate-pulse"
+                          style={{
+                            background: group.accent,
+                            opacity: 0.4,
+                          }}
+                        />
+                      )}
+                    </div>
                     <span
-                      className="text-[10px] font-semibold tracking-widest uppercase"
+                      className="text-[11px] font-bold tracking-wide uppercase transition-colors"
                       style={{
                         color: groupHasActive && isGroupCollapsed
                           ? group.accent
-                          : 'rgba(255,255,255,0.38)',
+                          : 'rgba(255,255,255,0.45)',
+                        letterSpacing: '0.08em',
                       }}
                     >
                       {group.title}
                     </span>
                   </div>
                   <ChevronDown
-                    className="w-3 h-3 transition-transform duration-200"
+                    className="w-3.5 h-3.5 transition-transform duration-200"
                     style={{
-                      color: 'rgba(255,255,255,0.25)',
+                      color: 'rgba(255,255,255,0.3)',
                       transform: isGroupCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
                     }}
                   />

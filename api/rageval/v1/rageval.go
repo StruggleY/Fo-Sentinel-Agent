@@ -30,9 +30,7 @@ type TracesReq struct {
 	g.Meta   `path:"/rageval/v1/traces" method:"GET" tags:"RagEval" summary:"最近RAG链路列表"`
 	Page     int    `json:"page" d:"1"`
 	PageSize int    `json:"page_size" d:"5"`
-	Status   string `json:"status"`    // P2: 过滤 success/error
-	NoDoc    string `json:"no_doc"`    // P2: 过滤 true/false
-	CacheHit string `json:"cache_hit"` // P2: 过滤 true/false
+	Status   string `json:"status"` // 过滤 success/error
 }
 
 // TracesRes 最近 RAG 链路列表响应
@@ -57,7 +55,7 @@ type TraceDetailRes struct {
 	DurationMs        int64       `json:"duration_ms"`
 	TotalInputTokens  int         `json:"total_input_tokens"`
 	TotalOutputTokens int         `json:"total_output_tokens"`
-	EstimatedCostUSD  float64     `json:"estimated_cost_usd"`
+	EstimatedCostCNY  float64     `json:"estimated_cost_cny"`
 	StartTime         string      `json:"start_time"`
 	Nodes             interface{} `json:"nodes"`         // []TraceNodeItem 树形
 	FeedbackVote      int         `json:"feedback_vote"` // P2: 关联反馈
@@ -76,7 +74,7 @@ type FeedbackReq struct {
 	g.Meta       `path:"/rageval/v1/feedback" method:"POST" tags:"RagEval" summary:"提交消息反馈"`
 	SessionID    string `json:"session_id" v:"required#session_id不能为空"`
 	MessageIndex int    `json:"message_index"`
-	Vote         int    `json:"vote" v:"required|in:1,-1#vote不能为空|vote必须为1或-1"`
+	Vote         int    `json:"vote" v:"required|in:1,-1,0#vote不能为空|vote必须为1、-1或0"`
 	Reason       string `json:"reason"`
 }
 

@@ -1,6 +1,6 @@
 # ── HTTP 服务器 ────────────────────────────────────────────────────────────────
 server:
-  address: ":8000"
+  address: ":8001"
   openapiPath: "/api.json"
   swaggerPath: "/swagger"
   clientMaxBodySize: 52428800  # 50 MB，防止超大文件上传打爆内存
@@ -13,19 +13,19 @@ logger:
 # ── AI 模型 ────────────────────────────────────────────────────────────────────
 # 主推理模型（深度思考 / 各专业 Agent ReAct 推理）
 ds_think_chat_model:
-  api_key: "your-api-key"
+  api_key: ""
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   model: "deepseek-v3-1-terminus"
 
 # 快速模型（意图识别路由 / Executor 步骤调度，低延迟优先）
 ds_quick_chat_model:
-  api_key: "your-api-key"
+  api_key: ""
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   model: "deepseek-v3-1-terminus"
 
 # 向量嵌入模型（DashScope text-embedding-v4，同时用于 Rerank）
 doubao_embedding_model:
-  api_key: "your-dashscope-api-key"
+  api_key: ""
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
   model: "text-embedding-v4"
 
@@ -37,6 +37,11 @@ redis:
   addr: "localhost:6379"
   password: ""
   db: 0
+
+  # 对话历史缓存：多轮对话上下文持久化到 Redis，服务重启后可恢复
+  chat_cache:
+    ttl: 720            # 缓存有效期（小时），720h = 30 天
+    key_prefix: "session"
 
   # 语义缓存：对 RAG 检索结果缓存，相似度命中时跳过 Embedding + Milvus 调用
   semantic_cache:
@@ -56,15 +61,10 @@ retriever:
   # 意图置信度阈值：低于此值时返回歧义引导提示，而非强制路由
   confidence_threshold: 0.70
 
-  # 对话历史缓存：多轮对话上下文持久化到 Redis，服务重启后可恢复
-  chat_cache:
-    ttl: 720            # 缓存有效期（小时），720h = 30 天
-    key_prefix: "session"
-
   # Rerank 精排：对 Milvus 召回结果重新打分排序，提升检索精准度
   rerank:
     enabled: true
-    api_key: "your-dashscope-api-key"
+    api_key: ""
     model: "qwen3-rerank"
     base_url: "https://dashscope.aliyuncs.com/compatible-api/v1"
     instruct: "Given a web search query, retrieve relevant passages that answer the query."
@@ -100,7 +100,7 @@ memory:
 tools:
   web_search:
     # Tavily Search API，专为 AI Agent 设计，申请地址：https://tavily.com
-    tavily_api_key: "tvly-xxxxxxxxxxxx"
+    tavily_api_key: ""
     tavily_base_url: "https://api.tavily.com/search"
     tavily_search_depth: "advanced"   # basic（快速）| advanced（深度，结果更全）
 
@@ -109,6 +109,21 @@ trace:
   enabled: true
   max_error_length: 1000
   record_prompt: false        # 是否记录 Prompt/Completion 原文（开启将显著增加写入量）
+  record_sql: true           # 是否记录 SQL 语句（开启将记录慢查询 SQL 原文）
+  db_slow_threshold_ms: 100   # 慢查询阈值（毫秒），超过此值的查询才会被追踪
+  snapshot_messages: 10       # 对话快照保存的最近消息数，0 禁用（生产环境可设为 0）
+  # 模型单价（¥/1M tokens，直接填写人民币，无需汇率换算）
+  # 键名与 TraceNode.model_name 字段值匹配（大小写不敏感前缀匹配）
+  model_pricing:
+    deepseek-v3:
+      input: 2.0              # 火山引擎 Ark ¥2/1M input tokens
+      output: 8.0             # 火山引擎 Ark ¥8/1M output tokens
+    text-embedding-v4:
+      input: 0.5              # DashScope text-embedding-v4 ¥0.5/1M tokens
+      output: 0.0
+    qwen3-rerank:
+      input: 0.5              # ¥0.0005/千tokens = ¥0.5/1M tokens（最大500个文档/次，单文档上限4K tokens，请求上限120K tokens）
+      output: 0.0
 
 # ── 知识库 ─────────────────────────────────────────────────────────────────────
 knowledge:

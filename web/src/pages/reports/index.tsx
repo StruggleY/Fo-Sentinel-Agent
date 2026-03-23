@@ -19,6 +19,7 @@ import ReportDetailModal from './components/ReportDetailModal'
 import { reportService } from '@/services/report'
 import type { Report } from '@/types'
 import toast from 'react-hot-toast'
+import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 
 const reportTypeConfig: Record<string, { label: string; class: string }> = {
   vuln_alert: { label: '漏洞告警', class: 'tag-danger' },
@@ -167,12 +168,17 @@ export default function Reports() {
               className="input pl-9 w-52"
             />
           </div>
-          <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setPage(1) }} className="select w-32">
-            <option value="all">全部类型</option>
-            <option value="vuln_alert">漏洞告警</option>
-            <option value="weekly">周报</option>
-            <option value="custom">分析报告</option>
-          </select>
+          <CustomSelect
+            value={typeFilter}
+            onChange={v => { setTypeFilter(v); setPage(1) }}
+            className="w-32"
+            options={[
+              { value: 'all', label: '全部类型' },
+              { value: 'vuln_alert', label: '漏洞告警' },
+              { value: 'weekly', label: '周报' },
+              { value: 'custom', label: '分析报告' },
+            ] satisfies SelectOption[]}
+          />
           <button onClick={fetchReports} disabled={loading} className="btn-default">
             <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
             刷新
@@ -261,7 +267,7 @@ export default function Reports() {
                         <Inbox className="w-16 h-16 mb-4 text-gray-200" />
                         <p className="text-base font-medium text-gray-500 mb-1">暂无报告</p>
                         <p className="text-sm text-gray-400">
-                          前往 <strong className="text-gray-600">Multi-Agent 事件分析</strong> 页面进行分析后，点击「保存到报告库」即可
+                          前往 <strong className="text-gray-600">Agent 事件分析</strong> 页面进行分析后，点击「保存到报告库」即可
                         </p>
                       </div>
                     </td>

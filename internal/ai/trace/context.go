@@ -105,7 +105,10 @@ type ActiveTrace struct {
 	mu                sync.Mutex
 	TotalInputTokens  int64
 	TotalOutputTokens int64
-	TotalCachedTokens int64
+	// PrimaryModelName 记录本次请求最多 Token 的 LLM 模型名（用于成本估算）
+	PrimaryModelName   string
+	primaryModelTokens int64   // 内部记录：最大 token 数对应的模型
+	TotalCostCNY       float64 // 所有 LLM 节点成本之和（CNY），由 AddCost() 累加
 
 	// toolInputs：TOOL 节点的输入参数缓存（nodeID → 截断后的 JSON 字符串）。
 	// 工具调用的参数在 OnStart（input）中可见，输出在 OnEnd（output）中可见，
@@ -118,16 +121,39 @@ type ActiveTrace struct {
 	// 替代原来的范围扫描（WHERE trace_id = ? AND status = 'running'），
 	// 从根本上避免 InnoDB Next-Key Lock 与并发点更新之间的死锁。
 	pendingNodeIDs map[string]struct{}
+
+	// StreamWg 跟踪所有 OnEndWithStreamOutput 启动的后台排空 goroutine。
+	// asyncFinishRun 通过 WaitGroup + 超时等待这些 goroutine 完成，
+	StreamWg sync.WaitGroup
 }
 
 // AddTokens 线程安全地向 ActiveTrace 累加 Token 数量。
+// modelName 用于追踪"主模型"（Token 消耗最多的模型），供成本估算使用。
 // 由 buildNodeUpdate() 在每个 LLM 节点的 OnEnd/OnEndWithStream 回调中调用。
-func (t *ActiveTrace) AddTokens(in, out, cached int) {
+func (t *ActiveTrace) AddTokens(in, out int) {
+	t.AddTokensWithModel(in, out, "")
+}
+
+// AddTokensWithModel 带模型名称的 Token 累加，追踪 Token 消耗最多的模型。
+func (t *ActiveTrace) AddTokensWithModel(in, out int, modelName string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.TotalInputTokens += int64(in)
 	t.TotalOutputTokens += int64(out)
-	t.TotalCachedTokens += int64(cached)
+	// 用 in+out 判断主模型（Token 最多的那个）
+	nodeTokens := int64(in + out)
+	if modelName != "" && nodeTokens > t.primaryModelTokens {
+		t.primaryModelTokens = nodeTokens
+		t.PrimaryModelName = modelName
+	}
+}
+
+// AddCost 线程安全地向 ActiveTrace 累加节点级别成本（CNY）。
+// 由 buildNodeUpdate() 在每个 LLM 节点的 OnEnd/OnEndWithStream 回调中调用。
+func (t *ActiveTrace) AddCost(cost float64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.TotalCostCNY += cost
 }
 
 // SetNodeStartTime 记录节点开始时间，供同一节点的 OnEnd/OnError 回调计算耗时。

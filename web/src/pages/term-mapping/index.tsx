@@ -18,6 +18,7 @@ import toast from 'react-hot-toast'
 import StatCard from '@/components/common/StatCard'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import Pagination from '@/components/common/Pagination'
+import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 import { termMappingService, type TermMappingItem, type CreateTermMappingReq } from '@/services/termMapping'
 
 // ── 优先级徽章 ────────────────────────────────────────────────────────────────
@@ -335,11 +336,11 @@ export default function TermMappingPage() {
               className="input pl-9 w-52"
             />
           </div>
-          <select value={filterEnabled} onChange={(e) => setFilterEnabled(e.target.value)} className="select w-28">
-            <option value="all">全部状态</option>
-            <option value="enabled">仅启用</option>
-            <option value="disabled">仅禁用</option>
-          </select>
+          <CustomSelect value={filterEnabled} onChange={v => setFilterEnabled(v)} className="w-28" options={[
+            { value: 'all', label: '全部状态' },
+            { value: 'enabled', label: '仅启用' },
+            { value: 'disabled', label: '仅禁用' },
+          ] satisfies SelectOption[]} />
           {searchQuery && (
             <button onClick={() => setSearchQuery('')} className="btn-default"><X className="w-4 h-4" /></button>
           )}

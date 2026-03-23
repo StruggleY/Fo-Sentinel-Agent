@@ -27,6 +27,7 @@ type ChatReq struct {
 	g.Meta       `path:"/chat/v1/chat" method:"post" summary:"多 Agent 对话"`
 	Query        string `json:"query" v:"required"`
 	SessionId    string `json:"session_id"`    // 会话唯一标识，前端生成并持久化，用于跨轮次上下文隔离
+	MessageIndex int    `json:"message_index"` // 消息在会话中的序号，用于关联用户反馈
 	DeepThinking bool   `json:"deep_thinking"` // 深度思考模式：true 时直接进入 Plan Agent，跳过意图识别路由
 	WebSearch    bool   `json:"web_search"`    // 联网搜索开关：true 时各 Agent 可调用 web_search 工具
 }

@@ -61,8 +61,10 @@ const (
 	NodeTypeRetriever = "RETRIEVER"
 	NodeTypeEmbedding = "EMBEDDING"
 	NodeTypeLambda    = "LAMBDA"
-	NodeTypeAgent     = "AGENT" // 被 Executor 调度的子 Agent（手动埋点）
-	NodeTypeCache     = "CACHE" // Redis 操作（session/semantic cache 手动埋点）
+	NodeTypeAgent     = "AGENT"  // 被 Executor 调度的子 Agent（手动埋点）
+	NodeTypeCache     = "CACHE"  // Redis 操作（session/semantic cache 手动埋点）
+	NodeTypeDB        = "DB"     // MySQL 慢查询（>100ms，GORM plugin 埋点）
+	NodeTypeRerank    = "RERANK" // Rerank 模型调用（qwen3-rerank，手动埋点）
 )
 
 // ── 标准化错误码 ───────────────────────────────────────────────────────────────

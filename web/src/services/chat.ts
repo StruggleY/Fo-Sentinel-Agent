@@ -115,6 +115,7 @@ export const chatService = {
   // Intent 意图驱动多 Agent 对话
   multiAgentChat: (
     query: string,
+    messageIndex: number,
     deepThinking: boolean,
     webSearch: boolean,
     onMessage: (intent: string, content: string) => void,
@@ -123,7 +124,7 @@ export const chatService = {
   ) => {
     streamFetch(
       '/api/chat/v1/chat',
-      { query, session_id: getCurrentSessionId(), deep_thinking: deepThinking, web_search: webSearch },
+      { query, session_id: getCurrentSessionId(), message_index: messageIndex, deep_thinking: deepThinking, web_search: webSearch },
       (type, content) => onMessage(type, content),
       onDone,
       undefined,

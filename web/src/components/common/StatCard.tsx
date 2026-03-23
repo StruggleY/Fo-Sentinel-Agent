@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { cn } from '@/utils'
 
 const toneMap = {
@@ -15,7 +16,7 @@ interface StatCardProps {
   value: number | string
   Icon: LucideIcon
   tone?: keyof typeof toneMap
-  sub?: string
+  sub?: string | ReactNode
 }
 
 export default function StatCard({ label, value, Icon, tone = 'gray', sub }: StatCardProps) {
@@ -28,7 +29,7 @@ export default function StatCard({ label, value, Icon, tone = 'gray', sub }: Sta
       <div className="min-w-0 flex-1">
         <p className={cn('text-2xl font-bold leading-none tabular-nums', cls.val)}>{value}</p>
         <p className="text-xs text-gray-500 mt-1 truncate">{label}</p>
-        {sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>}
+        {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
       </div>
     </div>
   )

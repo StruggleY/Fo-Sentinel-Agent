@@ -6,6 +6,7 @@ import (
 	"time"
 
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
+	"Fo-Sentinel-Agent/utility/stringutil"
 
 	"github.com/google/uuid"
 )
@@ -114,6 +115,10 @@ func FinishSpan(ctx context.Context, nodeID string, err error, meta map[string]a
 	var update *NodeUpdate
 	if len(meta) > 0 {
 		update = &NodeUpdate{}
+		// 提取 cache_hit 到独立字段
+		if hit, ok := meta["hit"].(bool); ok {
+			update.CacheHit = hit
+		}
 		if b, e := json.Marshal(meta); e == nil {
 			update.Metadata = string(b)
 		}
@@ -123,10 +128,59 @@ func FinishSpan(ctx context.Context, nodeID string, err error, meta map[string]a
 	errMsg, errCode, errType := "", "", ""
 	if err != nil {
 		status = StatusError
-		errMsg = truncateError(err)
+		errMsg = stringutil.TruncateError(err, GetConfig().MaxErrorLength)
 		errCode, errType = classifyError(err)
 	}
 
-	at.UntrackNode(nodeID)
-	asyncFinishNode(nodeID, status, errMsg, errCode, errType, nodeStartTime, endTime, update)
+	// 将 UntrackNode 推迟到 asyncFinishNode goroutine 的 UPDATE 完成后，
+	// 避免 INSERT/UPDATE 竞态下节点提前从 pendingNodeIDs 移除。
+	asyncFinishNode(nodeID, status, errMsg, errCode, errType, nodeStartTime, endTime, update,
+		func() { at.UntrackNode(nodeID) })
+}
+
+// FinishSpanWithCost 关闭手动 span 并记录模型调用的 Token 消耗与成本（CNY）。
+// 专为 Eino 无法自动感知的外部模型 API（如 Rerank）设计，会同步累加到
+// ActiveTrace 的全链路 Token 和成本统计中，确保 TraceRun.estimated_cost_cny 正确汇总。
+//
+// inputTokens：API 消耗的输入 Token（rerank 模型只有 total tokens，统一算作 input）
+// outputTokens：API 消耗的输出 Token（rerank 为 0）
+func FinishSpanWithCost(ctx context.Context, nodeID, modelName string, inputTokens, outputTokens int, err error) {
+	if nodeID == "" {
+		return
+	}
+	at := Extract(ctx)
+	if at == nil {
+		return
+	}
+	at.Stack.Pop()
+
+	endTime := time.Now()
+	nodeStartTime := at.GetNodeStartTime(nodeID)
+
+	// 累加到全链路 Token 和成本统计
+	if inputTokens > 0 || outputTokens > 0 {
+		at.AddTokensWithModel(inputTokens, outputTokens, modelName)
+	}
+	costCNY := estimateCost(ctx, modelName, int64(inputTokens), int64(outputTokens))
+	if costCNY > 0 {
+		at.AddCost(costCNY)
+	}
+
+	update := &NodeUpdate{
+		ModelName:    modelName,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		CostCNY:      costCNY,
+	}
+
+	status := StatusSuccess
+	errMsg, errCode, errType := "", "", ""
+	if err != nil {
+		status = StatusError
+		errMsg = stringutil.TruncateError(err, GetConfig().MaxErrorLength)
+		errCode, errType = classifyError(err)
+	}
+
+	asyncFinishNode(nodeID, status, errMsg, errCode, errType, nodeStartTime, endTime, update,
+		func() { at.UntrackNode(nodeID) })
 }

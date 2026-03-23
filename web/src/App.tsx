@@ -11,8 +11,6 @@ import TermMapping from './pages/term-mapping'
 import Traces from './pages/traces'
 import TraceDetail from './pages/traces/detail'
 import Knowledge from './pages/knowledge'
-import KnowledgeDocs from './pages/knowledge/docs'
-import KnowledgeChunks from './pages/knowledge/chunks'
 import RagEval from './pages/rag-eval'
 
 function App() {
@@ -32,9 +30,12 @@ function App() {
           <Route path="traces" element={<Traces />} />
           <Route path="traces/:traceId" element={<TraceDetail />} />
           <Route path="knowledge" element={<Knowledge />} />
-          <Route path="knowledge/:baseId/docs" element={<KnowledgeDocs />} />
-          <Route path="knowledge/:baseId/docs/:docId/chunks" element={<KnowledgeChunks />} />
+          {/* 旧子路由重定向到统一知识库页面 */}
+          <Route path="knowledge/:baseId/docs" element={<Navigate to="/knowledge?tab=bases" replace />} />
+          <Route path="knowledge/:baseId/docs/:docId/chunks" element={<Navigate to="/knowledge?tab=bases" replace />} />
           <Route path="rag-eval" element={<RagEval />} />
+          {/* /cost-monitor 重定向到 /traces?tab=overview */}
+          <Route path="cost-monitor" element={<Navigate to="/traces?tab=overview" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

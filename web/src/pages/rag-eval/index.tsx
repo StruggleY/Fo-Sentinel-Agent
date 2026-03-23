@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   RefreshCw, CheckCircle2, XCircle, Clock,
   Database, FileSearch, TrendingUp, ExternalLink,
   ThumbsUp, ThumbsDown, FlaskConical, Loader2,
-  Activity, Filter, BookOpen, Star, Trash2,
+  Activity, Filter, BookOpen, Star, Trash2, X,
 } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import StatCard from '@/components/common/StatCard'
@@ -14,6 +14,7 @@ import { ragevalService, type DashboardMetrics, type TraceItem, type FeedbackSta
 import { cn } from '@/utils'
 import toast from 'react-hot-toast'
 import TraceDetailModal from './components/TraceDetailModal'
+import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 
 type Window = '24h' | '7d' | '30d'
 
@@ -25,6 +26,12 @@ function fmtMs(ms: number) {
 
 function fmtPct(v: number) {
   return `${(v * 100).toFixed(1)}%`
+}
+
+const statusConfig: Record<string, { label: string; class: string; icon: typeof CheckCircle2 }> = {
+  success: { label: '成功', class: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+  error:   { label: '失败', class: 'bg-red-50 text-red-700 border-red-200', icon: XCircle },
+  running: { label: '运行中', class: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock },
 }
 
 function statusTone(status?: string): 'emerald' | 'amber' | 'red' | 'gray' {
@@ -65,7 +72,7 @@ function buildChartOption(metrics: DashboardMetrics) {
       },
     },
     legend: {
-      data: ['成功率', '无文档率', '平均延迟'],
+      data: ['成功率', '平均延迟'],
       bottom: 0,
       textStyle: { color: '#94a3b8', fontSize: 11 },
       icon: 'circle',
@@ -122,24 +129,6 @@ function buildChartOption(metrics: DashboardMetrics) {
         },
       },
       {
-        name: '无文档率',
-        type: 'line',
-        yAxisIndex: 0,
-        data: metrics.trends.map(t => t.no_doc_rate),
-        smooth: 0.3,
-        symbol: 'none',
-        lineStyle: { color: '#F97316', width: 2 },
-        areaStyle: {
-          color: {
-            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(249,115,22,0.12)' },
-              { offset: 1, color: 'rgba(249,115,22,0.01)' },
-            ],
-          },
-        },
-      },
-      {
         name: '平均延迟',
         type: 'line',
         yAxisIndex: 1,
@@ -167,6 +156,7 @@ function buildChartOption(metrics: DashboardMetrics) {
 
 export default function RagEvalDashboard() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [window_, setWindow] = useState<Window>('24h')
   const [loading, setLoading] = useState(false)
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
@@ -175,10 +165,7 @@ export default function RagEvalDashboard() {
   const [tracesPage, setTracesPage] = useState(1)
   const [tracesPageSize, setTracesPageSize] = useState(5)
   const [feedbackStats, setFeedbackStats] = useState<FeedbackStats | null>(null)
-  // P2: 过滤
   const [filterStatus, setFilterStatus] = useState('')
-  const [filterNoDoc, setFilterNoDoc] = useState('')
-  const [filterCacheHit, setFilterCacheHit] = useState('')
   // P0: 详情 modal
   const [detailTrace, setDetailTrace] = useState<TraceDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -196,8 +183,6 @@ export default function RagEvalDashboard() {
           page: tracesPage,
           pageSize: tracesPageSize,
           status: filterStatus,
-          noDoc: filterNoDoc,
-          cacheHit: filterCacheHit,
         }),
         ragevalService.getFeedbackStats(),
       ])
@@ -206,13 +191,32 @@ export default function RagEvalDashboard() {
       setTracesTotal(tRes.total)
       setFeedbackStats(f)
     } catch {
-      toast.error('加载数据失败')
+      // 静默失败，避免后端未启动时弹窗
     } finally {
       setLoading(false)
     }
-  }, [window_, tracesPage, tracesPageSize, filterStatus, filterNoDoc, filterCacheHit])
+  }, [window_, tracesPage, tracesPageSize, filterStatus])
 
   useEffect(() => { refresh() }, [refresh])
+
+  // 路由变化监听：切换到此页面时自动刷新（仅当路径是 /rag-eval 时）
+  useEffect(() => {
+    if (location.pathname === '/rag-eval') {
+      const timer = setTimeout(() => refresh(), 100)
+      return () => clearTimeout(timer)
+    }
+  }, [location.pathname, refresh])
+
+  // 页面可见性监听：切换回页面时自动刷新
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refresh()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [refresh])
 
   // 自动轮询：有 running 状态的链路时，每 5s 刷新一次
   useEffect(() => {
@@ -241,7 +245,7 @@ export default function RagEvalDashboard() {
       const d = await ragevalService.getTraceDetail(traceId)
       setDetailTrace(d)
     } catch {
-      toast.error('加载链路详情失败')
+      // 静默失败
     } finally {
       setDetailLoading(false)
     }
@@ -327,10 +331,10 @@ export default function RagEvalDashboard() {
         </div>
       </div>
 
-      {/* ── 区块1：KPI 卡片（5个主指标一行） ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4 flex-shrink-0">
+      {/* ── 区块1：KPI 卡片（3个主指标一行） ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 flex-shrink-0">
         {loading && !metrics ? (
-          Array.from({ length: 5 }).map((_, i) => (
+          Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="rounded-xl border border-gray-100 bg-gray-50 p-4 h-24 animate-pulse" />
           ))
         ) : (
@@ -353,19 +357,6 @@ export default function RagEvalDashboard() {
               value={metrics ? fmtMs(metrics.p95_latency_ms) : '—'}
               Icon={TrendingUp}
               tone={statusTone(metrics?.latency_status)}
-            />
-            <StatCard
-              label="缓存命中率"
-              value={metrics ? fmtPct(metrics.cache_hit_rate) : '—'}
-              Icon={Database}
-              tone="indigo"
-            />
-            <StatCard
-              label="无文档率"
-              value={metrics ? fmtPct(metrics.no_doc_rate) : '—'}
-              Icon={FileSearch}
-              tone={statusTone(metrics?.no_doc_rate_status)}
-              sub="检索结果为空的比率"
             />
           </>
         )}
@@ -453,7 +444,7 @@ export default function RagEvalDashboard() {
               </div>
 
               {/* 最近反馈 */}
-              {feedbackStats.recent.length > 0 && (
+              {feedbackStats.recent && feedbackStats.recent.length > 0 && (
                 <div className="flex-1 space-y-1">
                   <p className="text-xs font-medium text-gray-500 mb-2">最近反馈</p>
                   {feedbackStats.recent.map((r, i) => (
@@ -509,41 +500,28 @@ export default function RagEvalDashboard() {
         </div>
 
         {/* P2: 过滤栏 */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-50 bg-gray-50/50">
-          <Filter className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-          <select
+        <div className="flex items-center gap-2.5 px-5 py-3 border-b border-gray-100 bg-gray-50/60">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400 font-medium mr-1">
+            <Filter className="w-3.5 h-3.5" />
+            筛选
+          </div>
+          <CustomSelect
             value={filterStatus}
-            onChange={e => { setFilterStatus(e.target.value); setTracesPage(1) }}
-            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-300"
-          >
-            <option value="">全部状态</option>
-            <option value="success">成功</option>
-            <option value="error">失败</option>
-          </select>
-          <select
-            value={filterNoDoc}
-            onChange={e => { setFilterNoDoc(e.target.value); setTracesPage(1) }}
-            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-300"
-          >
-            <option value="">无文档：全部</option>
-            <option value="true">有空结果</option>
-            <option value="false">无空结果</option>
-          </select>
-          <select
-            value={filterCacheHit}
-            onChange={e => { setFilterCacheHit(e.target.value); setTracesPage(1) }}
-            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-300"
-          >
-            <option value="">缓存：全部</option>
-            <option value="true">已命中</option>
-            <option value="false">未命中</option>
-          </select>
-          {(filterStatus || filterNoDoc || filterCacheHit) && (
+            onChange={v => { setFilterStatus(v); setTracesPage(1) }}
+            className={cn(filterStatus && '!border-indigo-400 !text-indigo-700 bg-indigo-50/60')}
+            options={[
+              { value: '', label: '全部状态' },
+              { value: 'success', label: '成功' },
+              { value: 'error', label: '失败' },
+            ] satisfies SelectOption[]}
+          />
+          {filterStatus && (
             <button
-              onClick={() => { setFilterStatus(''); setFilterNoDoc(''); setFilterCacheHit(''); setTracesPage(1) }}
-              className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              onClick={() => { setFilterStatus(''); setTracesPage(1) }}
+              className="ml-1 inline-flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-md transition-colors font-medium"
             >
-              清除过滤
+              <X className="w-3 h-3" />
+              清除
             </button>
           )}
         </div>
@@ -580,7 +558,7 @@ export default function RagEvalDashboard() {
                     className="rounded border-gray-300"
                   />
                 </th>
-                {['时间', '链路名称', '会话 ID', '状态', '耗时', '缓存命中', '无文档', '反馈', '操作'].map(h => (
+                {['时间', '链路名称', '会话 ID', '状态', '耗时', '反馈', '操作'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-800 whitespace-nowrap">
                     {h}
                   </th>
@@ -590,18 +568,21 @@ export default function RagEvalDashboard() {
             <tbody className="divide-y divide-gray-50">
               {loading && traces.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center">
+                  <td colSpan={8} className="px-4 py-12 text-center">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-300" />
                   </td>
                 </tr>
               ) : traces.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-400">
+                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-gray-400">
                     暂无链路数据
                   </td>
                 </tr>
               ) : (
-                traces.map(t => (
+                traces.map(t => {
+                  const sc = statusConfig[t.status] || statusConfig.running
+                  const StatusIcon = sc.icon
+                  return (
                   <tr key={t.trace_id} className={cn('hover:bg-gray-50 transition-colors', selected.has(t.trace_id) && 'bg-blue-50/60')}>
                     <td className="pl-4 pr-2 py-3" onClick={e => e.stopPropagation()}>
                       <input
@@ -623,23 +604,12 @@ export default function RagEvalDashboard() {
                       ) : <span className="text-gray-300 text-xs">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={cn(
-                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border',
-                        t.status === 'success'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-red-50 text-red-700 border-red-200',
-                      )}>
-                        {t.status === 'success' ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                        {t.status === 'success' ? '成功' : '失败'}
+                      <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border', sc.class)}>
+                        <StatusIcon className="w-3 h-3" />
+                        {sc.label}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-600 tabular-nums">{fmtMs(t.duration_ms)}</td>
-                    <td className="px-4 py-3 text-xs tabular-nums">
-                      {t.cache_hit ? <span className="text-emerald-600 font-medium">✓ 命中</span> : <span className="text-gray-300">✗</span>}
-                    </td>
-                    <td className="px-4 py-3 text-xs tabular-nums">
-                      {t.no_doc ? <span className="text-red-500 font-medium">✓ 空结果</span> : <span className="text-gray-300">✗</span>}
-                    </td>
                     <td className="px-4 py-3 text-xs">
                       {t.feedback_vote === 1
                         ? <ThumbsUp className="w-3.5 h-3.5 text-emerald-500" />
@@ -651,9 +621,9 @@ export default function RagEvalDashboard() {
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => openDetail(t.trace_id)}
+                          onClick={() => navigate(`/traces/${t.trace_id}`)}
                           className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 transition-all"
-                          title="查看详情"
+                          title="查看链路详情"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>
@@ -671,7 +641,8 @@ export default function RagEvalDashboard() {
                       </div>
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>

@@ -1,4 +1,31 @@
 // Package rageval RAG 检索质量评估服务：KPI 聚合 + 用户反馈 CRUD。
+//
+// # 背景与动机
+//
+// RAG（检索增强生成）系统的质量直接影响 AI 回答的准确性，但传统日志难以量化评估：
+//   - 检索召回率低：Milvus 返回的文档与问题不相关，导致 LLM 回答偏离
+//   - 缓存命中率不透明：语义缓存是否真正减少了 Embedding API 调用？
+//   - 用户满意度未追踪：AI 回答质量好坏缺乏反馈闭环
+//
+// # 设计目标
+//
+//  1. 数据驱动优化：通过 KPI 仪表盘量化 RAG 系统表现（成功率、延迟、检索质量）
+//  2. 问题快速定位：链路列表支持按状态过滤，点击查看详细 Trace 树，精准排查低质量回答
+//  3. 用户反馈闭环：点赞/踩机制收集真实满意度，指导 Prompt 和检索策略迭代
+//
+// # 数据来源
+//
+// 本模块不直接执行 RAG 检索，而是从 trace 系统聚合已记录的链路数据：
+//   - agent_trace_runs：请求级别指标（成功率、总耗时、Token 消耗）
+//   - agent_trace_nodes：节点级别指标（RETRIEVER 节点的召回文档数、相似度分数）
+//   - message_feedbacks：用户主动提交的点赞/踩反馈
+//
+// # 与 trace 系统的协作
+//
+// trace 系统（internal/ai/trace/）负责"记录"，rageval 负责"分析"：
+//   - trace.StartRun/FinishRun 在每次请求时写入 TraceRun
+//   - trace.Callback 自动捕获 RETRIEVER 节点的检索质量指标（avg_vector_score 等）
+//   - rageval.GetDashboard 聚合这些原始数据，计算 KPI 并生成趋势图
 package rageval
 
 import (
@@ -10,16 +37,35 @@ import (
 
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // ── Dashboard 指标 ──────────────────────────────────────────────────────────
+//
+// GetDashboard 从 trace 数据聚合 RAG 系统的关键性能指标（KPI）。
+//
+// 时间窗口（window 参数）：
+//   - "24h"：最近 24 小时，按小时分组（适合实时监控）
+//   - "7d"：最近 7 天，按天分组（适合周趋势分析）
+//   - "30d"：最近 30 天，按天分组（适合月度报告）
+//
+// KPI 指标说明：
+//   - SuccessRate：status='success' 的请求占比（0-1），反映系统稳定性
+//   - AvgLatencyMs：平均响应耗时（毫秒），反映用户体验
+//   - P95LatencyMs：95 分位延迟（毫秒），排除异常值后的典型慢请求耗时
+//   - AvgRetrievedDocs：RETRIEVER 节点平均召回文档数，反映检索覆盖度
+//   - AvgTopScore：RETRIEVER 节点平均最高相似度分（0-1），反映检索精准度
+//
+// 阈值判断（*Status 字段）：
+//   - SuccessRate：>= 0.99 为 good，>= 0.95 为 warning，否则 bad
+//   - P95LatencyMs：<= 5s 为 good，<= 15s 为 warning，否则 bad
+//   这些阈值基于生产环境经验值，可通过配置文件调整（TODO）
 
 // TrendPoint 单个时间点的趋势数据。
 type TrendPoint struct {
 	Timestamp    string  `json:"timestamp"`      // 格式：2006-01-02 15（小时）或 2006-01-02（天）
 	SuccessRate  float64 `json:"success_rate"`   // 0-1
 	AvgLatencyMs int64   `json:"avg_latency_ms"` // 平均延迟（毫秒）
-	NoDocRate    float64 `json:"no_doc_rate"`    // 0-1，无文档率
 }
 
 // DashboardMetrics KPI 汇总指标。
@@ -28,8 +74,6 @@ type DashboardMetrics struct {
 	SuccessRate      float64 `json:"success_rate"`
 	AvgLatencyMs     int64   `json:"avg_latency_ms"`
 	P95LatencyMs     int64   `json:"p95_latency_ms"`
-	CacheHitRate     float64 `json:"cache_hit_rate"`
-	NoDocRate        float64 `json:"no_doc_rate"`
 	TotalRuns        int64   `json:"total_runs"`
 	AvgRetrievedDocs float64 `json:"avg_retrieved_docs"` // P1: 平均召回文档数
 	AvgTopScore      float64 `json:"avg_top_score"`      // P1: 平均最高相似度分
@@ -37,7 +81,6 @@ type DashboardMetrics struct {
 	// 阈值状态（good/warning/bad）
 	SuccessRateStatus string `json:"success_rate_status"`
 	LatencyStatus     string `json:"latency_status"`
-	NoDocRateStatus   string `json:"no_doc_rate_status"`
 
 	// 趋势数据
 	Trends []TrendPoint `json:"trends"`
@@ -87,41 +130,21 @@ func GetDashboard(ctx context.Context, window string) (*DashboardMetrics, error)
 		p95LatencyMs = durations[p95Idx]
 	}
 
-	// ── 查 agent_trace_nodes（CACHE / RETRIEVER）──────────────────────────────
-	var cacheNodes []dao.TraceNode
-	db.Where("start_time >= ? AND node_type = ?", since, "CACHE").Find(&cacheNodes)
-
-	var cacheTotal, cacheHits int64
-	for _, n := range cacheNodes {
-		cacheTotal++
-		if n.CacheHit {
-			cacheHits++
-		}
-	}
-	cacheHitRate := float64(0)
-	if cacheTotal > 0 {
-		cacheHitRate = float64(cacheHits) / float64(cacheTotal)
-	}
-
+	// ── 查 agent_trace_nodes（RETRIEVER）──────────────────────────────────
 	var retrieverNodes []dao.TraceNode
 	db.Where("start_time >= ? AND node_type = ?", since, "RETRIEVER").Find(&retrieverNodes)
 
-	var retrieverTotal, noDocCount int64
+	var retrieverTotal int64
 	var totalDocCount int64
 	var totalTopScore float64
 	for _, n := range retrieverNodes {
 		retrieverTotal++
-		if n.FinalTopK == 0 {
-			noDocCount++
-		}
 		totalDocCount += int64(n.DocCount)
 		totalTopScore += n.MaxVectorScore
 	}
-	noDocRate := float64(0)
 	avgRetrievedDocs := float64(0)
 	avgTopScore := float64(0)
 	if retrieverTotal > 0 {
-		noDocRate = float64(noDocCount) / float64(retrieverTotal)
 		avgRetrievedDocs = float64(totalDocCount) / float64(retrieverTotal)
 		avgTopScore = totalTopScore / float64(retrieverTotal)
 	}
@@ -131,20 +154,26 @@ func GetDashboard(ctx context.Context, window string) (*DashboardMetrics, error)
 		SuccessRate:       successRate,
 		AvgLatencyMs:      avgLatencyMs,
 		P95LatencyMs:      p95LatencyMs,
-		CacheHitRate:      cacheHitRate,
-		NoDocRate:         noDocRate,
 		TotalRuns:         total,
 		AvgRetrievedDocs:  avgRetrievedDocs,
 		AvgTopScore:       avgTopScore,
 		SuccessRateStatus: rateStatus(successRate, 0.99, 0.95),
 		LatencyStatus:     latencyStatus(p95LatencyMs),
-		NoDocRateStatus:   inverseRateStatus(noDocRate, 0.10, 0.30),
 		Trends:            buildTrends(runs, since, groupByHour),
 	}
 	return metrics, nil
 }
 
 // ── Trace 链路列表 ─────────────────────────────────────────────────────────
+//
+// ListTraces 返回最近的 RAG 链路记录，支持分页和状态过滤。
+//
+// 设计要点：
+//   1. 过滤事件分析链路（trace_name='event.pipeline'）：这类链路通常是后台批处理，
+//      不代表用户交互质量，排除后 KPI 更准确反映真实用户体验。
+//   2. 关联用户反馈：通过 (session_id, message_index) 精确匹配 message_feedbacks 表，
+//      在列表中直接显示点赞/踩状态，方便快速识别低质量回答。
+//   3. 分页限制：pageSize 最大 100，防止单次查询返回过多数据影响前端渲染性能。
 
 // TraceItem 最近 RAG 链路简要信息。
 type TraceItem struct {
@@ -153,14 +182,12 @@ type TraceItem struct {
 	SessionID    string `json:"session_id"`
 	Status       string `json:"status"`
 	DurationMs   int64  `json:"duration_ms"`
-	CacheHit     bool   `json:"cache_hit"`
-	NoDoc        bool   `json:"no_doc"`
 	StartTime    string `json:"start_time"`
-	FeedbackVote int    `json:"feedback_vote"` // P2: 0=无反馈 1=点赞 -1=点踩
+	FeedbackVote int    `json:"feedback_vote"` // 0=无反馈 1=点赞 -1=点踩
 }
 
-// ListTraces 返回分页的 trace 记录，支持 status/noDoc/cacheHit 过滤。
-func ListTraces(ctx context.Context, page, pageSize int, status, noDoc, cacheHit string) ([]TraceItem, int64, error) {
+// ListTraces 返回分页的 trace 记录，支持 status 过滤。
+func ListTraces(ctx context.Context, page, pageSize int, status string) ([]TraceItem, int64, error) {
 	db, err := dao.DB(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -177,6 +204,8 @@ func ListTraces(ctx context.Context, page, pageSize int, status, noDoc, cacheHit
 	if status != "" {
 		q = q.Where("status = ?", status)
 	}
+	// 过滤掉事件分析链路（event.pipeline）
+	q = q.Where("trace_name != ?", "event.pipeline")
 
 	var total int64
 	q.Count(&total)
@@ -184,75 +213,40 @@ func ListTraces(ctx context.Context, page, pageSize int, status, noDoc, cacheHit
 	var runs []dao.TraceRun
 	q.Order("start_time desc").Offset(offset).Limit(pageSize).Find(&runs)
 
-	// 批量取这些 trace 的 CACHE/RETRIEVER 节点
-	traceIDs := make([]string, len(runs))
-	for i, r := range runs {
-		traceIDs[i] = r.TraceID
+	// 关联 session 反馈（按 session_id + message_index 精确匹配）
+	type feedbackKey struct {
+		sessionID    string
+		messageIndex int
 	}
+	feedbackMap := map[feedbackKey]int{}
 
-	cacheHitMap := map[string]bool{}
-	noDocMap := map[string]bool{}
-	if len(traceIDs) > 0 {
-		var nodes []dao.TraceNode
-		db.Where("trace_id IN ? AND node_type IN ?", traceIDs, []string{"CACHE", "RETRIEVER"}).Find(&nodes)
-		for _, n := range nodes {
-			if n.NodeType == "CACHE" && n.CacheHit {
-				cacheHitMap[n.TraceID] = true
-			}
-			if n.NodeType == "RETRIEVER" && n.FinalTopK == 0 {
-				noDocMap[n.TraceID] = true
-			}
-		}
-	}
-
-	// P2: 按 noDoc/cacheHit 在内存中过滤（节点数据已加载）
-	var filtered []dao.TraceRun
+	sessionIDs := make([]string, 0, len(runs))
 	for _, r := range runs {
-		if noDoc == "true" && !noDocMap[r.TraceID] {
-			continue
-		}
-		if noDoc == "false" && noDocMap[r.TraceID] {
-			continue
-		}
-		if cacheHit == "true" && !cacheHitMap[r.TraceID] {
-			continue
-		}
-		if cacheHit == "false" && cacheHitMap[r.TraceID] {
-			continue
-		}
-		filtered = append(filtered, r)
-	}
-
-	// P2: 关联 session 反馈（取每个 session 最新一条）
-	sessionIDs := make([]string, 0, len(filtered))
-	for _, r := range filtered {
 		if r.SessionID != "" {
 			sessionIDs = append(sessionIDs, r.SessionID)
 		}
 	}
-	feedbackMap := map[string]int{}
+
 	if len(sessionIDs) > 0 {
 		var feedbacks []dao.MessageFeedback
-		db.Where("session_id IN ?", sessionIDs).Order("created_at desc").Find(&feedbacks)
+		db.Where("session_id IN ?", sessionIDs).Find(&feedbacks)
 		for _, f := range feedbacks {
-			if _, exists := feedbackMap[f.SessionID]; !exists {
-				feedbackMap[f.SessionID] = f.Vote
-			}
+			key := feedbackKey{sessionID: f.SessionID, messageIndex: f.MessageIndex}
+			feedbackMap[key] = f.Vote
 		}
 	}
 
-	items := make([]TraceItem, len(filtered))
-	for i, r := range filtered {
+	items := make([]TraceItem, len(runs))
+	for i, r := range runs {
+		key := feedbackKey{sessionID: r.SessionID, messageIndex: r.MessageIndex}
 		items[i] = TraceItem{
 			TraceID:      r.TraceID,
 			TraceName:    r.TraceName,
 			SessionID:    r.SessionID,
 			Status:       r.Status,
 			DurationMs:   r.DurationMs,
-			CacheHit:     cacheHitMap[r.TraceID],
-			NoDoc:        noDocMap[r.TraceID],
 			StartTime:    r.StartTime.Format("2006-01-02 15:04:05"),
-			FeedbackVote: feedbackMap[r.SessionID],
+			FeedbackVote: feedbackMap[key],
 		}
 	}
 	return items, total, nil
@@ -271,6 +265,24 @@ func DeleteTrace(ctx context.Context, traceID string) error {
 }
 
 // ── 用户反馈 CRUD ──────────────────────────────────────────────────────────
+//
+// 用户反馈机制设计：
+//
+// 1. 反馈粒度：按 (session_id, message_index) 唯一标识一条 AI 回复
+//    - session_id：对话会话 ID，跨多轮对话保持不变
+//    - message_index：消息在会话中的序号（从 0 开始），精确定位某条回复
+//
+// 2. 反馈类型：
+//    - vote=1：点赞（有帮助）
+//    - vote=-1：点踩（没帮助）
+//    - vote=0：取消反馈（删除记录）
+//
+// 3. Upsert 语义：同一 (session_id, message_index) 重复提交时更新 vote/reason，
+//    而非插入新记录，保证一条回复只有一条反馈记录。
+//
+// 4. 反馈用途：
+//    - 短期：在 Traces 列表中显示满意度，快速识别问题回答
+//    - 长期：统计满意度趋势，指导 Prompt 优化和检索策略调整
 
 // SubmitFeedback 提交消息点赞/踩。
 // 同一 (session_id, message_index) 只保留最新一条，重复提交时更新 vote，
@@ -288,7 +300,8 @@ func SubmitFeedback(ctx context.Context, sessionID string, messageIndex, vote in
 	}
 	// Upsert：已存在则更新 vote/reason，不存在则插入
 	var existing dao.MessageFeedback
-	err = db.Where("session_id = ? AND message_index = ?", sessionID, messageIndex).
+	err = db.Session(&gorm.Session{Logger: db.Logger.LogMode(logger.Silent)}).
+		Where("session_id = ? AND message_index = ?", sessionID, messageIndex).
 		First(&existing).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -431,7 +444,6 @@ func buildTrends(runs []dao.TraceRun, since time.Time, byHour bool) []TrendPoint
 		total   int
 		success int
 		latSum  int64
-		noDoc   int
 	}
 	buckets := map[string]*bucket{}
 
@@ -471,7 +483,7 @@ func buildTrends(runs []dao.TraceRun, since time.Time, byHour bool) []TrendPoint
 	for _, k := range keys {
 		b := buckets[k]
 		if b == nil {
-			points = append(points, TrendPoint{Timestamp: k, SuccessRate: 0, AvgLatencyMs: 0, NoDocRate: 0})
+			points = append(points, TrendPoint{Timestamp: k, SuccessRate: 0, AvgLatencyMs: 0})
 			continue
 		}
 		sr := float64(0)
@@ -496,16 +508,6 @@ func rateStatus(v, good, warn float64) string {
 		return "good"
 	}
 	if v >= warn {
-		return "warning"
-	}
-	return "bad"
-}
-
-func inverseRateStatus(v, good, warn float64) string {
-	if v <= good {
-		return "good"
-	}
-	if v <= warn {
 		return "warning"
 	}
 	return "bad"
@@ -536,7 +538,7 @@ type TraceNodeItem struct {
 	ModelName    string  `json:"model_name,omitempty"`
 	InputTokens  int     `json:"input_tokens,omitempty"`
 	OutputTokens int     `json:"output_tokens,omitempty"`
-	CostUSD      float64 `json:"cost_usd,omitempty"`
+	CostCNY      float64 `json:"cost_cny,omitempty"`
 	CacheHit     bool    `json:"cache_hit,omitempty"`
 	// RETRIEVER 专属
 	FinalTopK      int             `json:"final_top_k,omitempty"`
@@ -559,7 +561,7 @@ type TraceDetail struct {
 	DurationMs        int64           `json:"duration_ms"`
 	TotalInputTokens  int             `json:"total_input_tokens"`
 	TotalOutputTokens int             `json:"total_output_tokens"`
-	EstimatedCostUSD  float64         `json:"estimated_cost_usd"`
+	EstimatedCostCNY  float64         `json:"estimated_cost_cny"`
 	StartTime         string          `json:"start_time"`
 	Nodes             []TraceNodeItem `json:"nodes"`
 	FeedbackVote      int             `json:"feedback_vote"`
@@ -596,7 +598,7 @@ func GetTraceDetail(ctx context.Context, traceID string) (*TraceDetail, error) {
 			ModelName:      n.ModelName,
 			InputTokens:    n.InputTokens,
 			OutputTokens:   n.OutputTokens,
-			CostUSD:        n.CostUSD,
+			CostCNY:        n.CostCNY,
 			CacheHit:       n.CacheHit,
 			FinalTopK:      n.FinalTopK,
 			DocCount:       n.DocCount,
@@ -626,7 +628,7 @@ func GetTraceDetail(ctx context.Context, traceID string) (*TraceDetail, error) {
 	feedbackVote := 0
 	if run.SessionID != "" {
 		var fb dao.MessageFeedback
-		err := db.Where("session_id = ?", run.SessionID).Order("created_at desc").First(&fb).Error
+		err := db.Where("session_id = ? AND message_index = ?", run.SessionID, run.MessageIndex).First(&fb).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("query feedback: %w", err)
 		}
@@ -644,7 +646,7 @@ func GetTraceDetail(ctx context.Context, traceID string) (*TraceDetail, error) {
 		DurationMs:        run.DurationMs,
 		TotalInputTokens:  run.TotalInputTokens,
 		TotalOutputTokens: run.TotalOutputTokens,
-		EstimatedCostUSD:  run.EstimatedCostUSD,
+		EstimatedCostCNY:  run.EstimatedCostCNY,
 		StartTime:         run.StartTime.Format("2006-01-02 15:04:05"),
 		Nodes:             roots,
 		FeedbackVote:      feedbackVote,

@@ -610,7 +610,7 @@ function buildInsights(stats: DashboardStats): InsightItem[] {
       metric: '严重事件',
       change: `${stats.criticalCount} 条 (${((stats.criticalCount / total) * 100).toFixed(1)}%)`,
       context: '存在高优先级安全事件，需立即评估',
-      action: '建议进行 Multi-Agent 深度分析',
+      action: '建议进行 Agent 深度分析',
     })
   } else {
     items.push({

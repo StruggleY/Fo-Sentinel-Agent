@@ -8,6 +8,7 @@ import (
 	"Fo-Sentinel-Agent/internal/ai/embedder"
 	milvus "Fo-Sentinel-Agent/internal/dao/milvus"
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
+	"Fo-Sentinel-Agent/utility/stringutil"
 
 	"github.com/bytedance/sonic"
 	einomilvus "github.com/cloudwego/eino-ext/components/indexer/milvus"
@@ -98,20 +99,6 @@ func NewIndexer(ctx context.Context, partition string) (*einomilvus.Indexer, err
 	return idx, nil
 }
 
-// truncateText 按字节长度截断字符串，确保不超过 Milvus varchar 字段限制（8192 字节）。
-// 在 UTF-8 字符边界截断，避免产生无效编码。
-func truncateText(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	for i := maxBytes; i > 0; i-- {
-		if (s[i] & 0xC0) != 0x80 {
-			return s[:i]
-		}
-	}
-	return ""
-}
-
 // StoreEvents 将安全事件批量转换为向量文档并写入 Milvus events 分区，按 batchSize 分批执行。
 // 单批写入失败仅记录警告，不中断其余批次。
 // 返回所有成功写入 Milvus 的事件 ID，供调用方据此更新 indexed_at 标记。
@@ -126,12 +113,14 @@ func StoreEvents(ctx context.Context, events []dao.Event, batchSize int) ([]stri
 
 	// 将事件转换为 schema.Document（event → 向量文档）
 	docs := make([]*schema.Document, 0, len(events))
+	totalChars := 0
 	for _, e := range events {
 		text := e.Title
 		if e.Content != "" {
 			text += "\n" + e.Content
 		}
-		text = truncateText(text, 8000)
+		text = stringutil.TruncateBytes(text, 8000)
+		totalChars += len([]rune(text))
 		meta := map[string]any{
 			"source":     e.Source,
 			"event_type": e.EventType,
@@ -160,5 +149,14 @@ func StoreEvents(ctx context.Context, events []dao.Event, batchSize int) ([]stri
 		}
 		successIDs = append(successIDs, batchIDs...)
 	}
+
+	// 索引完成后记录 Embedding 成本估算（中英文混合按 1.5 字符/token）
+	if len(successIDs) > 0 {
+		estimatedTokens := int(float64(totalChars) / 1.5)
+		estimatedCost := float64(estimatedTokens) * 0.5 / 1_000_000.0
+		g.Log().Debugf(ctx, "[indexer] Embedding 成本估算 | docs=%d | chars=%d | estimatedTokens=%d | estimatedCost=¥%.6f",
+			len(successIDs), totalChars, estimatedTokens, estimatedCost)
+	}
+
 	return successIDs, nil
 }

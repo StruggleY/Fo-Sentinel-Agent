@@ -189,7 +189,7 @@ func (c *SessionMemory) summarizeOldMessages() {
 	var runErr error
 	if aitrace.IsEnabled() {
 		ctx = aitrace.StartRun(ctx, "memory.summarize", "background",
-			sessionID, "", map[string]any{"session_id": sessionID, "summarize_count": summarizeCount})
+			sessionID, 0, "", map[string]any{"session_id": sessionID, "summarize_count": summarizeCount})
 		defer func() { aitrace.FinishRun(ctx, runErr) }()
 	}
 

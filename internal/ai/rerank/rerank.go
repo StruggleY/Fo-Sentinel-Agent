@@ -22,6 +22,8 @@ import (
 	"sort"
 	"sync"
 
+	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
+
 	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"
 )
@@ -118,6 +120,14 @@ type rerankErrorResponse struct {
 	RequestID string `json:"request_id"`
 }
 
+// Rerank API 限制常量
+const (
+	rerankMaxDocs       = 500     // 每次请求最大文档数
+	rerankMaxDocTokens  = 4_000   // 单条文档最大 Token 数（超出由 API 自动截断）
+	rerankMaxReqTokens  = 120_000 // 请求级最大 Token 数（Query×N + 所有文档 Token 之和）
+	rerankCharsPerToken = 2       // 保守估算：2 字符 ≈ 1 token（中英混合场景）
+)
+
 // Rerank 调用 qwen3-rerank API 对文档按相关性重排序，返回 topN 个最相关文档。
 // 任意环节失败时降级返回原始列表前 topN 个，保证主流程不中断。
 func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Document, topN int) []RerankResult {
@@ -129,6 +139,31 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 		return fallback
 	}
 
+	// ── 文档数量限制：超过 500 截断，避免 API 报错 ─────────────────────────────
+	if len(docs) > rerankMaxDocs {
+		g.Log().Warningf(ctx, "[Rerank] 文档数超限，截断 | %d → %d", len(docs), rerankMaxDocs)
+		docs = docs[:rerankMaxDocs]
+	}
+
+	// ── 请求级 Token 总量估算：Query×N + 所有文档字符之和 ──────────────────────
+	// 公式：Query Tokens × Document数量 + Document Tokens总和
+	queryTokens := len([]rune(query)) / rerankCharsPerToken
+	totalEstTokens := queryTokens * len(docs)
+	for _, d := range docs {
+		totalEstTokens += len([]rune(d.Content)) / rerankCharsPerToken
+	}
+	if totalEstTokens > rerankMaxReqTokens {
+		// 按比例缩减文档数，确保估算 Token 不超限
+		ratio := float64(rerankMaxReqTokens) / float64(totalEstTokens)
+		newDocCount := int(float64(len(docs)) * ratio)
+		if newDocCount < 1 {
+			newDocCount = 1
+		}
+		g.Log().Warningf(ctx, "[Rerank] 请求 Token 估算超限，缩减文档 | 估算=%d tokens | docs %d → %d",
+			totalEstTokens, len(docs), newDocCount)
+		docs = docs[:newDocCount]
+	}
+
 	// topN <= 0 无意义；topN >= len(docs) 无需截断也无需重排，直接返回
 	if topN <= 0 || topN >= len(docs) {
 		g.Log().Debugf(ctx, "[Rerank] 跳过重排 | topN=%d | docs=%d", topN, len(docs))
@@ -138,6 +173,15 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 		}
 		return fallback
 	}
+
+	// ── 以下需要调用 Rerank API，开启 trace span ──────────────────────────────
+	spanCtx, spanID := aitrace.StartSpan(ctx, aitrace.NodeTypeRerank, r.model)
+	var traceTokens int
+	var traceErr error
+	defer func() {
+		g.Log().Debugf(ctx, "[Rerank] FinishSpanWithCost 调用 | model=%s | tokens=%d | spanID=%s", r.model, traceTokens, spanID)
+		aitrace.FinishSpanWithCost(spanCtx, spanID, r.model, traceTokens, 0, traceErr)
+	}()
 
 	texts := make([]string, len(docs))
 	for i, d := range docs {
@@ -153,6 +197,7 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 	})
 	if err != nil {
 		g.Log().Warningf(ctx, "[Rerank] 序列化失败，降级: %v", err)
+		traceErr = err
 		n := topN
 		if n > len(docs) {
 			n = len(docs)
@@ -167,6 +212,7 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.baseURL+"/reranks", bytes.NewReader(body))
 	if err != nil {
 		g.Log().Warningf(ctx, "[Rerank] 构建请求失败，降级: %v", err)
+		traceErr = err
 		n := topN
 		if n > len(docs) {
 			n = len(docs)
@@ -185,6 +231,7 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		g.Log().Warningf(ctx, "[Rerank] 请求失败，降级: %v", err)
+		traceErr = err
 		n := topN
 		if n > len(docs) {
 			n = len(docs)
@@ -200,6 +247,7 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		g.Log().Warningf(ctx, "[Rerank] 读取响应失败，降级: %v", err)
+		traceErr = err
 		n := topN
 		if n > len(docs) {
 			n = len(docs)
@@ -220,6 +268,7 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 		} else {
 			g.Log().Warningf(ctx, "[Rerank] API错误，降级 | status=%d | rawBody=%s", resp.StatusCode, string(data))
 		}
+		traceErr = fmt.Errorf("[Rerank] API error status=%d", resp.StatusCode)
 		n := topN
 		if n > len(docs) {
 			n = len(docs)
@@ -234,6 +283,7 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 	var rerankResp rerankResponse
 	if err := json.Unmarshal(data, &rerankResp); err != nil {
 		g.Log().Warningf(ctx, "[Rerank] 解析响应失败，降级: %v", err)
+		traceErr = err
 		n := topN
 		if n > len(docs) {
 			n = len(docs)
@@ -248,6 +298,8 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 	results := rerankResp.Results
 	if len(results) == 0 {
 		g.Log().Warningf(ctx, "[Rerank] 响应结果为空，降级")
+		// API 已成功响应并消耗了 token，仍记录用量
+		traceTokens = rerankResp.Usage.TotalTokens
 		n := topN
 		if n > len(docs) {
 			n = len(docs)
@@ -277,5 +329,7 @@ func (r *Client) Rerank(ctx context.Context, query string, docs []*schema.Docume
 
 	g.Log().Debugf(ctx, "[Rerank] 重排完成 | 输入=%d | 输出=%d | tokens=%d | id=%s",
 		len(docs), len(result), rerankResp.Usage.TotalTokens, rerankResp.ID)
+	// 记录成功的 token 消耗（由 defer 中的 FinishSpanWithCost 写入 trace）
+	traceTokens = rerankResp.Usage.TotalTokens
 	return result
 }

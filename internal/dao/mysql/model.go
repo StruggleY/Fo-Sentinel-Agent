@@ -10,16 +10,16 @@ import (
 type Event struct {
 	ID        string         `gorm:"column:id;primaryKey;size:64"`
 	Title     string         `gorm:"column:title;size:256;not null"`
-	Content   string         `gorm:"-"`                                              // 仅内存，不写库；入库前传给 IndexDocumentsAsync
-	EventType string         `gorm:"column:event_type;size:32;index"`                // rss / github / web / manual
-	DedupKey  string         `gorm:"column:dedup_key;size:64;index"`                 // SHA256(title|source|content[:500])，用于去重
-	Severity  string         `gorm:"column:severity;size:32;index"`                  // critical / high / medium / low
-	Source    string         `gorm:"column:source;size:128;index"`                   // 订阅源名称 或 web_search
-	Status    string         `gorm:"column:status;size:32;default:new;index"`        // new / processing / resolved / ignored
-	CVEID     string         `gorm:"column:cve_id;size:64;index"`                    // CVE-YYYY-NNNNN，web 类情报去重更新依据
-	RiskScore float64        `gorm:"column:risk_score"`                              // 0-10，由 severity 映射，0 表示未评估
-	Metadata  string         `gorm:"column:metadata;type:json"`                      // 扩展字段，如 {"link":"...","pub_date":"..."}
-	IndexedAt *time.Time     `gorm:"column:indexed_at;type:datetime"`                // nil = 未向量化，非 nil = 已写入 Milvus
+	Content   string         `gorm:"-"`                                       // 仅内存，不写库；入库前传给 IndexDocumentsAsync
+	EventType string         `gorm:"column:event_type;size:32;index"`         // rss / github / web / manual
+	DedupKey  string         `gorm:"column:dedup_key;size:64;index"`          // SHA256(title|source|content[:500])，用于去重
+	Severity  string         `gorm:"column:severity;size:32;index"`           // critical / high / medium / low
+	Source    string         `gorm:"column:source;size:128;index"`            // 订阅源名称 或 web_search
+	Status    string         `gorm:"column:status;size:32;default:new;index"` // new / processing / resolved / ignored
+	CVEID     string         `gorm:"column:cve_id;size:64;index"`             // CVE-YYYY-NNNNN，web 类情报去重更新依据
+	RiskScore float64        `gorm:"column:risk_score"`                       // 0-10，由 severity 映射，0 表示未评估
+	Metadata  string         `gorm:"column:metadata;type:json"`               // 扩展字段，如 {"link":"...","pub_date":"..."}
+	IndexedAt *time.Time     `gorm:"column:indexed_at;type:datetime"`         // nil = 未向量化，非 nil = 已写入 Milvus
 	CreatedAt time.Time      `gorm:"column:created_at;type:datetime;autoCreateTime"`
 	UpdatedAt time.Time      `gorm:"column:updated_at;type:datetime;autoUpdateTime"`
 	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index"`
@@ -65,7 +65,6 @@ type Report struct {
 
 func (Report) TableName() string { return "reports" }
 
-
 // User 系统用户
 type User struct {
 	ID        string         `gorm:"column:id;primaryKey;size:64"`
@@ -94,62 +93,62 @@ func (QueryTermMapping) TableName() string { return "query_term_mappings" }
 
 // TraceRun 全链路运行记录（1条/请求）
 type TraceRun struct {
-	ID                uint       `gorm:"primaryKey;autoIncrement"`
-	TraceID           string     `gorm:"column:trace_id;size:36;uniqueIndex;not null"`
-	TraceName         string     `gorm:"column:trace_name;size:200"`
-	EntryPoint        string     `gorm:"column:entry_point;size:200"`
-	SessionID         string     `gorm:"column:session_id;size:100;index"`
-	QueryText         string     `gorm:"column:query_text;type:text"`
-	Status            string     `gorm:"column:status;size:20;default:running"`
-	ErrorMessage      string     `gorm:"column:error_message;size:1000"`
-	ErrorCode         string     `gorm:"column:error_code;size:50"`
-	StartTime         time.Time  `gorm:"column:start_time;type:datetime(3)"`
-	EndTime           *time.Time `gorm:"column:end_time;type:datetime(3)"`
-	DurationMs        int64      `gorm:"column:duration_ms"`
-	TotalInputTokens  int        `gorm:"column:total_input_tokens;default:0"`
-	TotalOutputTokens int        `gorm:"column:total_output_tokens;default:0"`
-	TotalCachedTokens int        `gorm:"column:total_cached_tokens;default:0"`
-	EstimatedCostUSD  float64    `gorm:"column:estimated_cost_usd;type:decimal(10,6)"`
-	Tags              string     `gorm:"column:tags;type:text"`
-	CreatedAt         time.Time  `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+	ID                   uint       `gorm:"primaryKey;autoIncrement"`
+	TraceID              string     `gorm:"column:trace_id;size:36;uniqueIndex;not null"`
+	TraceName            string     `gorm:"column:trace_name;size:200"`
+	EntryPoint           string     `gorm:"column:entry_point;size:200"`
+	SessionID            string     `gorm:"column:session_id;size:100;index"`
+	MessageIndex         int        `gorm:"column:message_index;default:0"`
+	QueryText            string     `gorm:"column:query_text;type:text"`
+	Status               string     `gorm:"column:status;size:20;default:running"`
+	ErrorMessage         string     `gorm:"column:error_message;size:1000"`
+	ErrorCode            string     `gorm:"column:error_code;size:50"`
+	StartTime            time.Time  `gorm:"column:start_time;type:datetime(3)"`
+	EndTime              *time.Time `gorm:"column:end_time;type:datetime(3)"`
+	DurationMs           int64      `gorm:"column:duration_ms"`
+	TotalInputTokens     int        `gorm:"column:total_input_tokens;default:0"`
+	TotalOutputTokens    int        `gorm:"column:total_output_tokens;default:0"`
+	EstimatedCostCNY     float64    `gorm:"column:estimated_cost_cny;type:decimal(10,6)"`
+	Tags                 string     `gorm:"column:tags;type:text"`
+	ConversationSnapshot string     `gorm:"column:conversation_snapshot;type:mediumtext"`
+	CreatedAt            time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt            time.Time  `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (TraceRun) TableName() string { return "agent_trace_runs" }
 
 // TraceNode 链路节点记录（N条/请求）
 type TraceNode struct {
-	ID             uint           `gorm:"primaryKey;autoIncrement"`
-	TraceID        string         `gorm:"column:trace_id;size:36;index;not null"`
-	NodeID         string         `gorm:"column:node_id;size:36;uniqueIndex;not null"`
-	ParentNodeID   string         `gorm:"column:parent_node_id;size:36;index"`
-	Depth          int            `gorm:"column:depth;default:0"`
-	NodeType       string         `gorm:"column:node_type;size:50"`
-	NodeName       string         `gorm:"column:node_name;size:200"`
-	Status         string         `gorm:"column:status;size:20;default:running"`
-	ErrorMessage   string         `gorm:"column:error_message;size:1000"`
-	ErrorCode      string         `gorm:"column:error_code;size:50"`
-	ErrorType      string         `gorm:"column:error_type;size:100"`
-	StartTime      time.Time      `gorm:"column:start_time;type:datetime(3)"`
-	EndTime        *time.Time     `gorm:"column:end_time;type:datetime(3)"`
-	DurationMs     int64          `gorm:"column:duration_ms"`
-	ModelName      string         `gorm:"column:model_name;size:100"`
-	InputTokens    int            `gorm:"column:input_tokens"`
-	OutputTokens   int            `gorm:"column:output_tokens"`
-	CachedTokens   int            `gorm:"column:cached_tokens"`
-	CostUSD        float64        `gorm:"column:cost_usd;type:decimal(10,6)"`
-	PromptText     string         `gorm:"column:prompt_text;type:longtext"`
-	CompletionText string         `gorm:"column:completion_text;type:text"`
-	QueryText      string         `gorm:"column:query_text;type:text"`
-	RetrievedDocs  string         `gorm:"column:retrieved_docs;type:text"`
-	FinalTopK      int            `gorm:"column:final_top_k"`
-	CacheHit       bool           `gorm:"column:cache_hit"`
+	ID             uint       `gorm:"primaryKey;autoIncrement"`
+	TraceID        string     `gorm:"column:trace_id;size:36;index;not null"`
+	NodeID         string     `gorm:"column:node_id;size:36;uniqueIndex;not null"`
+	ParentNodeID   string     `gorm:"column:parent_node_id;size:36;index"`
+	Depth          int        `gorm:"column:depth;default:0"`
+	NodeType       string     `gorm:"column:node_type;size:50"`
+	NodeName       string     `gorm:"column:node_name;size:200"`
+	Status         string     `gorm:"column:status;size:20;default:running"`
+	ErrorMessage   string     `gorm:"column:error_message;size:1000"`
+	ErrorCode      string     `gorm:"column:error_code;size:50"`
+	ErrorType      string     `gorm:"column:error_type;size:100"`
+	StartTime      time.Time  `gorm:"column:start_time;type:datetime(3)"`
+	EndTime        *time.Time `gorm:"column:end_time;type:datetime(3)"`
+	DurationMs     int64      `gorm:"column:duration_ms"`
+	ModelName      string     `gorm:"column:model_name;size:100"`
+	InputTokens    int        `gorm:"column:input_tokens"`
+	OutputTokens   int        `gorm:"column:output_tokens"`
+	CostCNY        float64    `gorm:"column:cost_cny;type:decimal(10,6)"`
+	PromptText     string     `gorm:"column:prompt_text;type:longtext"`
+	CompletionText string     `gorm:"column:completion_text;type:text"`
+	QueryText      string     `gorm:"column:query_text;type:text"`
+	RetrievedDocs  string     `gorm:"column:retrieved_docs;type:text"`
+	FinalTopK      int        `gorm:"column:final_top_k"`
+	CacheHit       bool       `gorm:"column:cache_hit"`
 	// 检索质量指标（仅 RetrievalNode / MilvusRetriever 节点写入）
-	AvgVectorScore float64 `gorm:"column:avg_vector_score;type:decimal(6,4);default:0"`
-	MaxVectorScore float64 `gorm:"column:max_vector_score;type:decimal(6,4);default:0"`
-	DocCount       int     `gorm:"column:doc_count;default:0"`
-	RerankUsed     bool    `gorm:"column:rerank_used;default:false"`
-	AvgRerankScore float64 `gorm:"column:avg_rerank_score;type:decimal(6,4);default:0"`
+	AvgVectorScore float64        `gorm:"column:avg_vector_score;type:decimal(6,4);default:0"`
+	MaxVectorScore float64        `gorm:"column:max_vector_score;type:decimal(6,4);default:0"`
+	DocCount       int            `gorm:"column:doc_count;default:0"`
+	RerankUsed     bool           `gorm:"column:rerank_used;default:false"`
+	AvgRerankScore float64        `gorm:"column:avg_rerank_score;type:decimal(6,4);default:0"`
 	Metadata       string         `gorm:"column:metadata;type:text"`
 	CreatedAt      time.Time      `gorm:"column:created_at;autoCreateTime"`
 	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at;index"`
@@ -179,25 +178,25 @@ func (KnowledgeBase) TableName() string { return "knowledge_bases" }
 // 文档状态流转：pending → indexing → completed / failed。
 // 删除文档时同步清除 Milvus 向量、knowledge_chunks 记录和本地文件。
 type KnowledgeDocument struct {
-	ID            string         `gorm:"column:id;primaryKey;size:64"`
-	BaseID        string         `gorm:"column:base_id;size:64;not null;index"`             // 所属知识库 ID
-	Name          string         `gorm:"column:name;size:256;not null"`                     // 原始文件名（含扩展名）
-	FilePath      string         `gorm:"column:file_path;size:512;not null"`                // 本地保存路径（绝对或相对 workdir）
-	FileSize      int64          `gorm:"column:file_size;not null"`                         // 字节数，来自 os.Stat 或上传 multipart size
-	FileType      string         `gorm:"column:file_type;size:32;not null;index"`           // 扩展名（小写，不含点），如 pdf / md / docx
-	FileHash      string         `gorm:"column:file_hash;size:64;index"`                    // 文件 SHA256 hex（去重用），空值表示未计算
-	ChunkStrategy string         `gorm:"column:chunk_strategy;size:32;not null"`            // 分块策略：fixed_size / structure_aware / hierarchical
-	ChunkConfig   string         `gorm:"column:chunk_config;type:json"`                     // ChunkConfig JSON 序列化（供重建索引时复用）
-	ChunkCount    int            `gorm:"column:chunk_count;default:0"`                      // 索引完成后的实际子块数（indexing 阶段提前写入用于进度计算）
-	IndexedChunks int            `gorm:"column:indexed_chunks;default:0"`                   // 已写入 MySQL knowledge_chunks 的分块数（进度追踪，随批次递增）
+	ID              string         `gorm:"column:id;primaryKey;size:64"`
+	BaseID          string         `gorm:"column:base_id;size:64;not null;index"`             // 所属知识库 ID
+	Name            string         `gorm:"column:name;size:256;not null"`                     // 原始文件名（含扩展名）
+	FilePath        string         `gorm:"column:file_path;size:512;not null"`                // 本地保存路径（绝对或相对 workdir）
+	FileSize        int64          `gorm:"column:file_size;not null"`                         // 字节数，来自 os.Stat 或上传 multipart size
+	FileType        string         `gorm:"column:file_type;size:32;not null;index"`           // 扩展名（小写，不含点），如 pdf / md / docx
+	FileHash        string         `gorm:"column:file_hash;size:64;index"`                    // 文件 SHA256 hex（去重用），空值表示未计算
+	ChunkStrategy   string         `gorm:"column:chunk_strategy;size:32;not null"`            // 分块策略：fixed_size / structure_aware / hierarchical
+	ChunkConfig     string         `gorm:"column:chunk_config;type:json"`                     // ChunkConfig JSON 序列化（供重建索引时复用）
+	ChunkCount      int            `gorm:"column:chunk_count;default:0"`                      // 索引完成后的实际子块数（indexing 阶段提前写入用于进度计算）
+	IndexedChunks   int            `gorm:"column:indexed_chunks;default:0"`                   // 已写入 MySQL knowledge_chunks 的分块数（进度追踪，随批次递增）
 	IndexedAt       *time.Time     `gorm:"column:indexed_at;type:datetime"`                   // nil = 未索引，非 nil = 最近一次索引完成时间
 	IndexDurationMs int64          `gorm:"column:index_duration_ms;default:0"`                // 最近一次索引耗时（毫秒），0 = 未记录
 	IndexStatus     string         `gorm:"column:index_status;size:32;default:pending;index"` // pending / indexing / completed / failed
-	IndexError    string         `gorm:"column:index_error;type:text"`                      // 索引失败时的错误信息（completed 时清空）
-	Enabled       bool           `gorm:"column:enabled;default:true"`                       // 是否启用，禁用时不参与 RAG 检索
-	CreatedAt     time.Time      `gorm:"column:created_at;type:datetime;autoCreateTime"`
-	UpdatedAt     time.Time      `gorm:"column:updated_at;type:datetime;autoUpdateTime"`
-	DeletedAt     gorm.DeletedAt `gorm:"column:deleted_at;index"` // 软删除，硬数据（文件+向量）由 DeleteDoc 负责清理
+	IndexError      string         `gorm:"column:index_error;type:text"`                      // 索引失败时的错误信息（completed 时清空）
+	Enabled         bool           `gorm:"column:enabled;default:true"`                       // 是否启用，禁用时不参与 RAG 检索
+	CreatedAt       time.Time      `gorm:"column:created_at;type:datetime;autoCreateTime"`
+	UpdatedAt       time.Time      `gorm:"column:updated_at;type:datetime;autoUpdateTime"`
+	DeletedAt       gorm.DeletedAt `gorm:"column:deleted_at;index"` // 软删除，硬数据（文件+向量）由 DeleteDoc 负责清理
 }
 
 func (KnowledgeDocument) TableName() string { return "knowledge_documents" }
@@ -206,13 +205,13 @@ func (KnowledgeDocument) TableName() string { return "knowledge_documents" }
 // ChunkIndex 与 Milvus 文档 ID 一一对应，通过 metadata.doc_id + metadata.chunk_index 关联。
 // ContentPreview 存储子块完整文本（type:text），供管理界面展示与关键词搜索；向量化使用的内容同步存储于 Milvus content 字段。
 type KnowledgeChunk struct {
-	ID             string    `gorm:"column:id;primaryKey;size:64"`          // 与 Milvus 文档 ID 相同（uuid）
-	DocID          string    `gorm:"column:doc_id;size:64;not null;index"`  // 所属文档 ID，删除文档时 WHERE doc_id = ? 批量清理
-	ChunkIndex     int       `gorm:"column:chunk_index;not null"`           // 子块在文档中的全局序号（从 0 开始）
-	ContentPreview string    `gorm:"column:content_preview;type:text"`      // 子块完整文本（供管理界面展示与关键词搜索）
-	SectionTitle   string    `gorm:"column:section_title;size:256"`         // 章节标题（父子分块 / 结构化分块时填充，来自 ChunkResult.SectionTitle）
-	CharCount      int       `gorm:"column:char_count;not null"`            // 子块字符数（rune 数，非字节数）
-	Enabled        bool      `gorm:"column:enabled;default:true"`           // 是否启用，禁用时不参与 RAG 检索
+	ID             string    `gorm:"column:id;primaryKey;size:64"`         // 与 Milvus 文档 ID 相同（uuid）
+	DocID          string    `gorm:"column:doc_id;size:64;not null;index"` // 所属文档 ID，删除文档时 WHERE doc_id = ? 批量清理
+	ChunkIndex     int       `gorm:"column:chunk_index;not null"`          // 子块在文档中的全局序号（从 0 开始）
+	ContentPreview string    `gorm:"column:content_preview;type:text"`     // 子块完整文本（供管理界面展示与关键词搜索）
+	SectionTitle   string    `gorm:"column:section_title;size:256"`        // 章节标题（父子分块 / 结构化分块时填充，来自 ChunkResult.SectionTitle）
+	CharCount      int       `gorm:"column:char_count;not null"`           // 子块字符数（rune 数，非字节数）
+	Enabled        bool      `gorm:"column:enabled;default:true"`          // 是否启用，禁用时不参与 RAG 检索
 	CreatedAt      time.Time `gorm:"column:created_at;type:datetime;autoCreateTime"`
 	UpdatedAt      time.Time `gorm:"column:updated_at;type:datetime;autoUpdateTime"`
 }

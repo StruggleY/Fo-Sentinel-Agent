@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X, Github, Rss, Loader2, Zap } from 'lucide-react'
 import { subscriptionService } from '@/services/subscription'
 import toast from 'react-hot-toast'
+import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 
 import type { SourceType, Subscription } from '@/types'
 
@@ -275,19 +276,19 @@ export default function AddSubscriptionModal({
                 {/* Fetch Interval */}
                 <div className="form-item">
                   <label className="label">抓取间隔</label>
-                  <select
+                  <CustomSelect
                     value={formData.fetch_interval}
-                    onChange={(e) => setFormData({ ...formData, fetch_interval: Number(e.target.value) })}
-                    className="select focus:border-gray-400 focus:ring-gray-400"
-                  >
-                    <option value={15}>15 分钟</option>
-                    <option value={30}>30 分钟</option>
-                    <option value={60}>1 小时</option>
-                    <option value={180}>3 小时</option>
-                    <option value={360}>6 小时</option>
-                    <option value={720}>12 小时</option>
-                    <option value={1440}>24 小时</option>
-                  </select>
+                    onChange={v => setFormData({ ...formData, fetch_interval: Number(v) })}
+                    options={[
+                      { value: 15, label: '15 分钟' },
+                      { value: 30, label: '30 分钟' },
+                      { value: 60, label: '1 小时' },
+                      { value: 180, label: '3 小时' },
+                      { value: 360, label: '6 小时' },
+                      { value: 720, label: '12 小时' },
+                      { value: 1440, label: '24 小时' },
+                    ] satisfies SelectOption[]}
+                  />
                 </div>
 
                 {/* Fetch Immediately */}
@@ -319,17 +320,17 @@ export default function AddSubscriptionModal({
                 {/* Auth Type */}
                 <div className="form-item">
                   <label className="label">认证方式</label>
-                  <select
+                  <CustomSelect
                     value={formData.auth_type}
-                    onChange={(e) => setFormData({ ...formData, auth_type: e.target.value })}
-                    className="select focus:border-gray-400 focus:ring-gray-400"
-                  >
-                    <option value="none">无需认证</option>
-                    <option value="api_key">API Key</option>
-                    <option value="basic">Basic Auth</option>
-                    <option value="bearer">Bearer Token</option>
-                    <option value="oauth2">OAuth 2.0</option>
-                  </select>
+                    onChange={v => setFormData({ ...formData, auth_type: v })}
+                    options={[
+                      { value: 'none', label: '无需认证' },
+                      { value: 'api_key', label: 'API Key' },
+                      { value: 'basic', label: 'Basic Auth' },
+                      { value: 'bearer', label: 'Bearer Token' },
+                      { value: 'oauth2', label: 'OAuth 2.0' },
+                    ] satisfies SelectOption[]}
+                  />
                 </div>
 
                 {/* Auth Config */}

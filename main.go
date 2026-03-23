@@ -48,6 +48,10 @@ func main() {
 		dao.CreateIndexes(ctx)
 		// 确保默认知识库存在
 		knowledge.EnsureDefaultBase(ctx)
+		// 注册 GORM plugin（慢查询追踪）
+		if err := dao.RegisterPlugin(aitrace.NewGORMPlugin()); err != nil {
+			g.Log().Warningf(ctx, "register gorm plugin failed: %v", err)
+		}
 	}
 
 	// ========== 阶段2：AI组件初始化 ==========
@@ -81,7 +85,6 @@ func main() {
 		group.Bind(knowledgectrl.NewV1())
 		group.Bind(ragevalctrl.NewV1())
 	})
-	s.SetPort(6872)
 
 	// ========== 阶段4：后台任务启动 ==========
 	// 启动知识库文档异步索引 Worker Pool

@@ -253,7 +253,13 @@ func NewWithPartition(cli milvuscli.Client, eb embedding.Embedder, redisCli *gor
 
 // Retrieve 实现 einoretriever.Retriever 接口。
 func (c *Retriever) Retrieve(ctx context.Context, query string, opts ...einoretriever.Option) ([]*schema.Document, error) {
-	vecs, err := c.embedder.EmbedStrings(ctx, []string{query})
+	// 追踪 Embedding 调用，估算 token 并记录成本
+	embSpanCtx, embSpanID := aitrace.StartSpan(ctx, aitrace.NodeTypeEmbedding, "text-embedding-v4")
+	vecs, err := c.embedder.EmbedStrings(embSpanCtx, []string{query})
+	// 估算 token：中英文混合按 1.5 字符/token 估算
+	estimatedTokens := int(float64(len([]rune(query))) / 1.5)
+	aitrace.FinishSpanWithCost(embSpanCtx, embSpanID, "text-embedding-v4", estimatedTokens, 0, err)
+
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
 	}
@@ -268,12 +274,23 @@ func (c *Retriever) Retrieve(ctx context.Context, query string, opts ...einoretr
 	}
 	g.Log().Infof(ctx, "[SemanticCache] 缓存未命中，回源 Milvus 检索 | query=%q | partition=%q | hybrid=%v", query, c.partition, c.useHybrid)
 
+	// 追踪 Milvus 检索调用
+	retSpanCtx, retSpanID := aitrace.StartSpan(ctx, aitrace.NodeTypeRetriever, "Milvus-Search")
 	var docs []*schema.Document
 	if c.useHybrid {
-		docs, err = c.hybridSearch(ctx, query, queryVec)
+		docs, err = c.hybridSearch(retSpanCtx, query, queryVec)
 	} else {
-		docs, err = c.denseSearch(ctx, queryVec)
+		docs, err = c.denseSearch(retSpanCtx, queryVec)
 	}
+
+	// 构建 metadata
+	meta := map[string]any{
+		"doc_count": len(docs),
+		"partition": c.partition,
+		"hybrid":    c.useHybrid,
+	}
+	aitrace.FinishSpan(retSpanCtx, retSpanID, err, meta)
+
 	if err != nil {
 		return nil, err
 	}

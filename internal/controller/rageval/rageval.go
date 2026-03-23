@@ -25,21 +25,18 @@ func (c *controllerV1) Dashboard(ctx context.Context, req *v1.DashboardReq) (res
 		SuccessRate:       m.SuccessRate,
 		AvgLatencyMs:      m.AvgLatencyMs,
 		P95LatencyMs:      m.P95LatencyMs,
-		CacheHitRate:      m.CacheHitRate,
-		NoDocRate:         m.NoDocRate,
 		TotalRuns:         m.TotalRuns,
 		AvgRetrievedDocs:  m.AvgRetrievedDocs,
 		AvgTopScore:       m.AvgTopScore,
 		SuccessRateStatus: m.SuccessRateStatus,
 		LatencyStatus:     m.LatencyStatus,
-		NoDocRateStatus:   m.NoDocRateStatus,
 		Trends:            m.Trends,
 	}, nil
 }
 
 // Traces 返回最近 RAG 链路列表。
 func (c *controllerV1) Traces(ctx context.Context, req *v1.TracesReq) (res *v1.TracesRes, err error) {
-	items, total, err := rageval.ListTraces(ctx, req.Page, req.PageSize, req.Status, req.NoDoc, req.CacheHit)
+	items, total, err := rageval.ListTraces(ctx, req.Page, req.PageSize, req.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +58,7 @@ func (c *controllerV1) TraceDetail(ctx context.Context, req *v1.TraceDetailReq) 
 		DurationMs:        detail.DurationMs,
 		TotalInputTokens:  detail.TotalInputTokens,
 		TotalOutputTokens: detail.TotalOutputTokens,
-		EstimatedCostUSD:  detail.EstimatedCostUSD,
+		EstimatedCostCNY:  detail.EstimatedCostCNY,
 		StartTime:         detail.StartTime,
 		Nodes:             detail.Nodes,
 		FeedbackVote:      detail.FeedbackVote,

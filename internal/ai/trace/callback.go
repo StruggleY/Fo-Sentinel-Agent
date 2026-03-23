@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
+	"Fo-Sentinel-Agent/utility/stringutil"
 
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components"
@@ -14,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/google/uuid"
 )
 
@@ -97,7 +99,7 @@ func NewCallbackHandler() callbacks.Handler {
 		// TOOL 节点：在 OnStart 捕获输入参数（OnEnd 时输入已不可见）
 		if info.Component == components.ComponentOfTool {
 			if toolIn := tool.ConvCallbackInput(input); toolIn != nil && toolIn.ArgumentsInJSON != "" {
-				at.SetToolInput(nodeID, truncateText(toolIn.ArgumentsInJSON, 1000))
+				at.SetToolInput(nodeID, stringutil.TruncateRunes(toolIn.ArgumentsInJSON, 1000))
 			}
 		}
 
@@ -120,9 +122,11 @@ func NewCallbackHandler() callbacks.Handler {
 		}
 		endTime := time.Now()
 		nodeStartTime := at.GetNodeStartTime(nodeID)
-		update := buildNodeUpdate(info, output, at, nodeID)
-		at.UntrackNode(nodeID)
-		asyncFinishNode(nodeID, StatusSuccess, "", "", "", nodeStartTime, endTime, update)
+		update := buildNodeUpdate(ctx, info, output, at, nodeID)
+		// 将 UntrackNode 推迟到 asyncFinishNode goroutine 的 UPDATE 完成后，
+		// 避免 INSERT/UPDATE 竞态下节点提前从 pendingNodeIDs 移除。
+		asyncFinishNode(nodeID, StatusSuccess, "", "", "", nodeStartTime, endTime, update,
+			func() { at.UntrackNode(nodeID) })
 		at.Stack.Pop()
 		return ctx
 	})
@@ -140,8 +144,8 @@ func NewCallbackHandler() callbacks.Handler {
 		errCode, errType := classifyError(err)
 		endTime := time.Now()
 		nodeStartTime := at.GetNodeStartTime(nodeID)
-		at.UntrackNode(nodeID)
-		asyncFinishNode(nodeID, StatusError, truncateError(err), errCode, errType, nodeStartTime, endTime, nil)
+		asyncFinishNode(nodeID, StatusError, stringutil.TruncateError(err, GetConfig().MaxErrorLength), errCode, errType, nodeStartTime, endTime, nil,
+			func() { at.UntrackNode(nodeID) })
 		at.Stack.Pop()
 		return ctx
 	})
@@ -167,8 +171,11 @@ func NewCallbackHandler() callbacks.Handler {
 			return ctx
 		}
 		nodeStartTime := at.GetNodeStartTime(nodeID)
-		// 后台排空流：读取所有 chunk，取最后一个（含完整 TokenUsage）写终态
+		// 后台排空流：读取所有 chunk，取最后一个（含完整 TokenUsage）写终态。
+		// Add(1) 在 goroutine 外调用，避免 asyncFinishRun 在 goroutine 启动前就 Wait() 通过的竞态。
+		at.StreamWg.Add(1)
 		go func() {
+			defer at.StreamWg.Done()
 			defer output.Close()
 			var lastChunk callbacks.CallbackOutput
 			for {
@@ -177,16 +184,16 @@ func NewCallbackHandler() callbacks.Handler {
 					if err != io.EOF {
 						// 流异常（网络断开、LLM 报错等）：标记为错误
 						errCode, errType := classifyError(err)
-						at.UntrackNode(nodeID)
-						asyncFinishNode(nodeID, StatusError, truncateError(err), errCode, errType, nodeStartTime, time.Now(), nil)
+						asyncFinishNode(nodeID, StatusError, stringutil.TruncateError(err, GetConfig().MaxErrorLength), errCode, errType, nodeStartTime, time.Now(), nil,
+							func() { at.UntrackNode(nodeID) })
 					} else {
 						// 流正常结束：使用最后一个 chunk 提取 TokenUsage
 						var update *NodeUpdate
 						if lastChunk != nil {
-							update = buildNodeUpdate(info, lastChunk, at, nodeID)
+							update = buildNodeUpdate(ctx, info, lastChunk, at, nodeID)
 						}
-						at.UntrackNode(nodeID)
-						asyncFinishNode(nodeID, StatusSuccess, "", "", "", nodeStartTime, time.Now(), update)
+						asyncFinishNode(nodeID, StatusSuccess, "", "", "", nodeStartTime, time.Now(), update,
+							func() { at.UntrackNode(nodeID) })
 					}
 					return
 				}
@@ -254,13 +261,18 @@ func resolveNodeName(info *callbacks.RunInfo) string {
 
 // buildNodeUpdate 根据组件类型断言 output，提取结构化信息填充 NodeUpdate。
 // 每种组件类型的输出结构不同，需分别处理：
-//   - LLM（ChatModel）：提取 TokenUsage + 模型名 + 可选 Completion 文本
+//   - LLM（ChatModel）：提取 TokenUsage + 模型名 + 可选 Completion 文本，并计算节点成本
 //   - TOOL：将 OnStart 捕获的输入参数 + 本次输出合并为 metadata JSON
 //   - RETRIEVER：序列化检索结果（top-3，每条截断 500 字符）+ final_top_k
-func buildNodeUpdate(info *callbacks.RunInfo, output callbacks.CallbackOutput, at *ActiveTrace, nodeID string) *NodeUpdate {
+func buildNodeUpdate(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput, at *ActiveTrace, nodeID string) *NodeUpdate {
 	if info == nil || output == nil {
 		return nil
 	}
+
+	// 调试日志：记录所有节点的组件类型
+	g.Log().Debugf(ctx, "[buildNodeUpdate] 处理节点 | component=%s | type=%s | name=%s",
+		info.Component, info.Type, info.Name)
+
 	update := &NodeUpdate{}
 	switch info.Component {
 	case components.ComponentOfChatModel:
@@ -274,13 +286,17 @@ func buildNodeUpdate(info *callbacks.RunInfo, output callbacks.CallbackOutput, a
 		if modelOut.TokenUsage != nil {
 			update.InputTokens = modelOut.TokenUsage.PromptTokens
 			update.OutputTokens = modelOut.TokenUsage.CompletionTokens
-			update.CachedTokens = modelOut.TokenUsage.PromptTokenDetails.CachedTokens
-			// 累加到链路级别的 Token 累加器
-			at.AddTokens(update.InputTokens, update.OutputTokens, update.CachedTokens)
+			// 累加到链路级别的 Token 累加器（携带模型名以追踪主模型）
+			at.AddTokensWithModel(update.InputTokens, update.OutputTokens, update.ModelName)
+			// 计算节点级别成本并累加到链路总成本
+			nodeCost := estimateCost(ctx, update.ModelName,
+				int64(update.InputTokens), int64(update.OutputTokens))
+			update.CostCNY = nodeCost
+			at.AddCost(nodeCost)
 		}
 		// record_prompt=true 时记录 Completion 文本（含 PII 风险，默认关闭）
 		if GetConfig().RecordPrompt && modelOut.Message != nil {
-			update.CompletionText = truncateText(modelOut.Message.Content, 5000)
+			update.CompletionText = stringutil.TruncateRunes(modelOut.Message.Content, 5000)
 		}
 
 	case components.ComponentOfTool:
@@ -290,7 +306,7 @@ func buildNodeUpdate(info *callbacks.RunInfo, output callbacks.CallbackOutput, a
 			meta["tool_input"] = toolInput
 		}
 		if toolOut := tool.ConvCallbackOutput(output); toolOut != nil && toolOut.Response != "" {
-			meta["tool_output"] = truncateText(toolOut.Response, 2000)
+			meta["tool_output"] = stringutil.TruncateRunes(toolOut.Response, 2000)
 		}
 		if b, err := json.Marshal(meta); err == nil {
 			update.Metadata = string(b)
@@ -299,7 +315,9 @@ func buildNodeUpdate(info *callbacks.RunInfo, output callbacks.CallbackOutput, a
 	case components.ComponentOfRetriever:
 		retrieverOut := retriever.ConvCallbackOutput(output)
 		if retrieverOut == nil {
-			return nil
+			// Retriever 输出为空时仍需记录 FinalTopK=0
+			update.FinalTopK = 0
+			return update
 		}
 		update.FinalTopK = len(retrieverOut.Docs)
 		// 序列化 top-3 检索结果（每条内容截断 500 字符，防止 LONGTEXT 字段过大）
@@ -314,7 +332,7 @@ func buildNodeUpdate(info *callbacks.RunInfo, output callbacks.CallbackOutput, a
 				break
 			}
 			di := docInfo{
-				Content:  truncateText(doc.Content, 500),
+				Content:  stringutil.TruncateRunes(doc.Content, 500),
 				Metadata: doc.MetaData,
 			}
 			if doc.MetaData != nil {
@@ -329,23 +347,40 @@ func buildNodeUpdate(info *callbacks.RunInfo, output callbacks.CallbackOutput, a
 		if b, err := json.Marshal(docs); err == nil {
 			update.RetrievedDocs = string(b)
 		}
+
+	case components.ComponentOfEmbedding:
+		// Embedding 组件：提取 TokenUsage + 模型名，计算节点成本
+		// text-embedding-v4 等嵌入模型只有输入 token 成本，无输出 token
+		modelOut := model.ConvCallbackOutput(output)
+		if modelOut == nil {
+			g.Log().Warningf(ctx, "[Embedding] modelOut 为 nil")
+			return nil
+		}
+
+		var modelName string
+		if modelOut.Config != nil {
+			modelName = modelOut.Config.Model
+			update.ModelName = modelName
+		} else {
+			g.Log().Warningf(ctx, "[Embedding] Config 为 nil，无法获取模型名")
+		}
+
+		if modelOut.TokenUsage != nil {
+			update.InputTokens = modelOut.TokenUsage.PromptTokens
+			update.OutputTokens = 0 // Embedding 无输出 token
+			// 累加到链路级别的 Token 累加器
+			at.AddTokensWithModel(update.InputTokens, 0, modelName)
+			// 计算节点级别成本并累加到链路总成本
+			nodeCost := estimateCost(ctx, modelName,
+				int64(update.InputTokens), 0)
+			update.CostCNY = nodeCost
+			at.AddCost(nodeCost)
+			// 添加调试日志
+			g.Log().Debugf(ctx, "[Embedding] 成本计算 | model=%s | inputTokens=%d | cost=¥%.6f",
+				modelName, update.InputTokens, nodeCost)
+		} else {
+			g.Log().Warningf(ctx, "[Embedding] TokenUsage 为 nil")
+		}
 	}
 	return update
-}
-
-// truncateText 按 rune 数截断字符串（Unicode 安全），超出部分追加 "..."
-func truncateText(s string, maxRunes int) string {
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
-		return s
-	}
-	return string(runes[:maxRunes]) + "..."
-}
-
-// min 返回两个整数的较小值（Go 1.21 泛型 min 的兼容实现）
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

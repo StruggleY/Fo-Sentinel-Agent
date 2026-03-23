@@ -63,12 +63,10 @@ func DB(ctx context.Context) (*gorm.DB, error) {
 	return globalDB.WithContext(ctx), nil
 }
 
-// RegisterPlugin 向全局 DB 实例注册 GORM 插件。
-// 必须在 Init() 成功后调用；globalDB 为 nil 时静默忽略。
-// 用于注册外部插件（如 trace.NewGORMPlugin()），避免 dao/mysql 与 trace 包之间循环依赖。
+// RegisterPlugin 注册 GORM plugin（用于 trace 等扩展功能）
 func RegisterPlugin(plugin gorm.Plugin) error {
 	if globalDB == nil {
-		return nil
+		return fmt.Errorf("database not initialized")
 	}
 	return globalDB.Use(plugin)
 }

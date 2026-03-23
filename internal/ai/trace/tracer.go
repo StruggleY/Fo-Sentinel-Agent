@@ -6,7 +6,9 @@ import (
 	"time"
 
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
+	"Fo-Sentinel-Agent/utility/stringutil"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/google/uuid"
 )
 
@@ -41,12 +43,13 @@ import (
 // StartRun 创建本次请求的 TraceRun，将 ActiveTrace 注入 ctx，并异步写入初始记录。
 //
 // 参数：
-//   - name       : 链路语义名称，如 "chat.intent" / "chat.file_upload"，用于 Traces 页面分类
-//   - entryPoint : HTTP 路径，如 "/api/chat/v1/chat"，便于关联到接口维度
-//   - sessionID  : 前端传入的会话 ID，用于在 Traces 中按会话过滤
-//   - query      : 用户原始查询文本（截断至 2000 字符），不含 Prompt 模板
-//   - tags       : 额外标签（如 deep_thinking:true），序列化为 JSON 存储
-func StartRun(ctx context.Context, name, entryPoint, sessionID, query string, tags map[string]any) context.Context {
+//   - name         : 链路语义名称，如 "chat.intent" / "chat.file_upload"，用于 Traces 页面分类
+//   - entryPoint   : HTTP 路径，如 "/api/chat/v1/chat"，便于关联到接口维度
+//   - sessionID    : 前端传入的会话 ID，用于在 Traces 中按会话过滤
+//   - messageIndex : 消息在会话中的序号，用于关联用户反馈
+//   - query        : 用户原始查询文本（截断至 2000 字符），不含 Prompt 模板
+//   - tags         : 额外标签（如 deep_thinking:true），序列化为 JSON 存储
+func StartRun(ctx context.Context, name, entryPoint, sessionID string, messageIndex int, query string, tags map[string]any) context.Context {
 	if !IsEnabled() {
 		return ctx
 	}
@@ -74,16 +77,25 @@ func StartRun(ctx context.Context, name, entryPoint, sessionID, query string, ta
 		Stack:     &SpanStack{},
 	}
 
+	// 读取快照消息数配置，0 表示禁用快照
+	snapshotN, _ := g.Cfg().Get(ctx, "trace.snapshot_messages")
+	n := snapshotN.Int()
+	if n == 0 {
+		n = 10 // 默认值
+	}
+	snapshot := fetchSessionSnapshot(ctx, sessionID, n)
+
 	asyncInsertRun(&dao.TraceRun{
-		TraceID:    traceID,
-		TraceName:  name,
-		EntryPoint: entryPoint,
-		SessionID:  sessionID,
-		QueryText:  queryText,
-		Status:     StatusRunning,
-		StartTime:  now,
-		Tags:       tagsJSON,
-	})
+		TraceID:      traceID,
+		TraceName:    name,
+		EntryPoint:   entryPoint,
+		SessionID:    sessionID,
+		MessageIndex: messageIndex,
+		QueryText:    queryText,
+		Status:       StatusRunning,
+		StartTime:    now,
+		Tags:         tagsJSON,
+	}, snapshot)
 
 	return Inject(ctx, at)
 }
@@ -105,7 +117,7 @@ func FinishRun(ctx context.Context, err error) {
 	errCode := ""
 	if err != nil {
 		status = StatusError
-		errMsg = truncateError(err)
+		errMsg = stringutil.TruncateError(err, GetConfig().MaxErrorLength)
 		errCode, _ = classifyError(err)
 	}
 	asyncFinishRun(at, status, errMsg, errCode, endTime)
