@@ -182,7 +182,7 @@ export default function EventDetailModal({ event, onClose, onUpdate }: EventDeta
         </div>
 
         {/* Footer Actions */}
-        <div className="modal-footer">
+        <div className={cn('modal-footer', updatingStatus && 'opacity-60 pointer-events-none')}>
           <CustomSelect
             value={currentStatus}
             onChange={v => handleUpdateStatus(v)}

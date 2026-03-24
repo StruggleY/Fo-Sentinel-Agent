@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   RefreshCw, CheckCircle2, XCircle, Clock,
-  Database, FileSearch, TrendingUp, ExternalLink,
+  TrendingUp, ExternalLink,
   ThumbsUp, ThumbsDown, FlaskConical, Loader2,
   Activity, Filter, BookOpen, Star, Trash2, X,
 } from 'lucide-react'
@@ -621,7 +621,7 @@ export default function RagEvalDashboard() {
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => navigate(`/traces/${t.trace_id}`)}
+                          onClick={() => openDetail(t.trace_id)}
                           className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 transition-all"
                           title="查看链路详情"
                         >

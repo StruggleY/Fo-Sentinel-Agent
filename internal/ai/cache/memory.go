@@ -20,12 +20,13 @@
 package cache
 
 import (
-	"Fo-Sentinel-Agent/internal/ai/agent/summary_pipeline"
-	"Fo-Sentinel-Agent/internal/ai/token"
-	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 	"context"
 	"sync"
 	"sync/atomic"
+
+	"Fo-Sentinel-Agent/internal/ai/agent/summary_pipeline"
+	"Fo-Sentinel-Agent/internal/ai/token"
+	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"

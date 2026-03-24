@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2, Search, X } from 'lucide-react'
+import { Plus, Trash2, Search, X, Download } from 'lucide-react'
 import { ChatSession } from '@/services/chat'
 import { cn } from '@/utils'
 
@@ -9,6 +9,7 @@ interface SessionListProps {
   onSelectSession: (sessionId: string) => void
   onNewSession: () => void
   onDeleteSession: (sessionId: string) => void
+  onExportSession: (sessionId: string) => void
 }
 
 /** 按时间将会话分组：今天 / 7天内 / 30天内 / 更早 */
@@ -46,6 +47,7 @@ export default function SessionList({
   onSelectSession,
   onNewSession,
   onDeleteSession,
+  onExportSession,
 }: SessionListProps) {
   const [query, setQuery] = useState('')
 
@@ -151,21 +153,38 @@ export default function SessionList({
                         <span className="min-w-0 flex-1 truncate font-normal">
                           {session.title}
                         </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onDeleteSession(session.id)
-                          }}
-                          className={cn(
-                            'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-opacity duration-150 hover:bg-[rgba(0,0,0,0.06)]',
-                            isActive
-                              ? 'opacity-100 text-[#2563EB]'
-                              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 text-[#666666]'
-                          )}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onExportSession(session.id)
+                            }}
+                            className={cn(
+                              'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-opacity duration-150 hover:bg-[rgba(0,0,0,0.06)]',
+                              isActive
+                                ? 'opacity-100 text-[#2563EB]'
+                                : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 text-[#666666]'
+                            )}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onDeleteSession(session.id)
+                            }}
+                            className={cn(
+                              'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-opacity duration-150 hover:bg-[rgba(0,0,0,0.06)]',
+                              isActive
+                                ? 'opacity-100 text-[#2563EB]'
+                                : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 text-[#666666]'
+                            )}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
                     )
                   })}

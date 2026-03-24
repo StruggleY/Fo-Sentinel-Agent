@@ -72,9 +72,9 @@ func (s *Intent) Execute(query string, callback StreamCallback) (*Result, error)
 		// 异步保存最新状态到 Redis，不阻塞主链路
 		go func() {
 			bgCtx := context.Background()
-			if persistErr := cache.SaveSession(bgCtx, s.sessionId,
+			if persistErr := cache.SaveSessionWithRetry(bgCtx, s.sessionId,
 				s.memory.GetRecentMessages(), s.memory.GetLongTermSummary()); persistErr != nil {
-				g.Log().Errorf(bgCtx, "[Intent] 保存会话状态到 Redis 失败 | session=%s | err=%v", s.sessionId, persistErr)
+				g.Log().Errorf(bgCtx, "[Intent] 保存会话状态失败（已重试） | session=%s | err=%v", s.sessionId, persistErr)
 			}
 		}()
 	}

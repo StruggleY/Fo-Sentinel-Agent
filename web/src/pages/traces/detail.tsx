@@ -17,7 +17,6 @@ import {
   Zap,
   Server,
   Bot,
-  MessageSquare,
   Download,
   ArrowUpDown,
 } from 'lucide-react'
@@ -243,7 +242,7 @@ function NodeRow({ node, traceStartMs, totalMs, isTopSlowest, isCritical, selfTi
               <div className="flex flex-wrap gap-4">
                 {(node.inputTokens ?? 0) > 0 && <p><span className="text-gray-400">输入：</span><span className="text-blue-600 font-medium">{node.inputTokens}</span></p>}
                 {(node.outputTokens ?? 0) > 0 && <p><span className="text-gray-400">输出：</span><span className="text-violet-600 font-medium">{node.outputTokens}</span></p>}
-                {(node.costCny ?? 0) > 0 && <p><span className="text-gray-400">成本：</span><span className="text-emerald-600 font-medium">¥{node.costCny.toFixed(4)}</span></p>}
+                {(node.costCny ?? 0) > 0 && <p><span className="text-gray-400">成本：</span><span className="text-emerald-600 font-medium">¥{(node.costCny ?? 0).toFixed(4)}</span></p>}
               </div>
               {node.completionText && (
                 <div>
@@ -263,7 +262,7 @@ function NodeRow({ node, traceStartMs, totalMs, isTopSlowest, isCritical, selfTi
               )}
               <div className="flex flex-wrap gap-4">
                 {(node.inputTokens ?? 0) > 0 && <p><span className="text-gray-400">输入：</span><span className="text-blue-600 font-medium">{node.inputTokens}</span></p>}
-                {(node.costCny ?? 0) > 0 && <p><span className="text-gray-400">成本：</span><span className="text-emerald-600 font-medium">¥{node.costCny.toFixed(4)}</span></p>}
+                {(node.costCny ?? 0) > 0 && <p><span className="text-gray-400">成本：</span><span className="text-emerald-600 font-medium">¥{(node.costCny ?? 0).toFixed(4)}</span></p>}
               </div>
             </div>
           )}

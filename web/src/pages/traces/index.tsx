@@ -13,14 +13,13 @@ import {
   Copy,
   Check,
   GitCommit,
-  DollarSign,
-  TrendingDown,
   BarChart2,
   Cpu,
   Tag,
   CalendarDays,
   TrendingUp,
   Download,
+  Banknote,
 } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import { cn } from '@/utils'
@@ -95,35 +94,50 @@ const COST_RANGES: { value: CostRange; label: string; days: number; hours?: numb
   { value: '90d', label: '90 天',  days: 90 },
 ]
 
+// ── 图表日期格式化（ISO → MM-DD）───────────────────────────────────────────────
+function formatChartDate(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${m}-${day}`
+  } catch {
+    return iso.slice(0, 10)
+  }
+}
+
 // ── ECharts 配置 ───────────────────────────────────────────────────────────────
 
 function buildDailyTrendOption(data: CostOverview['dailyTrend']) {
-  const dates   = data.map(d => d.date)
-  const costs   = data.map(d => +(d.costCny).toFixed(4))
-  const inputs  = data.map(d => d.inputTokens)
+  const rawDates = data.map(d => d.date)
+  const dates = rawDates.map(formatChartDate)
+  const costs = data.map(d => +(d.costCny).toFixed(4))
+  const inputs = data.map(d => d.inputTokens)
   const outputs = data.map(d => d.outputTokens)
   return {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(255, 255, 255, 0.95)',
+      backgroundColor: 'rgba(255,255,255,0.96)',
       borderColor: '#e5e7eb',
       borderWidth: 1,
+      padding: [10, 14],
       textStyle: { color: '#374151', fontSize: 12 },
-      axisPointer: { type: 'cross', crossStyle: { color: '#cbd5e1' } },
+      axisPointer: { type: 'cross', crossStyle: { color: '#cbd5e1', width: 1 } },
       formatter(params: any[]) {
-        const date = params[0]?.axisValue || ''
+        const idx = params[0]?.dataIndex ?? 0
+        const dateStr = formatChartDate(rawDates[idx] || '')
         const lines = params.map((p: any) => {
           const val = p.seriesName === '成本(CNY)' ? `¥${p.value}` : formatTokens(p.value)
           return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0">
             <span style="display:flex;align-items:center;gap:6px">
-              <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.color}"></span>
+              <span style="display:inline-block;width:10px;height:3px;border-radius:2px;background:${p.color}"></span>
               <span style="color:#6b7280">${p.seriesName}</span>
             </span>
             <span style="font-weight:600;color:#111827">${val}</span>
           </div>`
         }).join('')
-        return `<div style="min-width:200px"><div style="font-weight:600;color:#111827;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb">${date}</div>${lines}</div>`
+        return `<div style="min-width:180px"><div style="font-weight:600;color:#111827;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb">${dateStr}</div>${lines}</div>`
       },
     },
     legend: {
@@ -136,9 +150,12 @@ function buildDailyTrendOption(data: CostOverview['dailyTrend']) {
     },
     grid: { top: 30, left: 70, right: 70, bottom: 50 },
     xAxis: {
-      type: 'category', data: dates, boundaryGap: false,
+      type: 'category',
+      data: dates,
+      boundaryGap: true,
       axisLine: { lineStyle: { color: '#e5e7eb', width: 1 } },
-      axisLabel: { color: '#6b7280', fontSize: 11, margin: 12 },
+      axisLabel: { color: '#6b7280', fontSize: 11, margin: 10, interval: 0 },
+      axisTick: { show: true, lineStyle: { color: '#e5e7eb' } },
       splitLine: { show: false },
     },
     yAxis: [
@@ -159,29 +176,30 @@ function buildDailyTrendOption(data: CostOverview['dailyTrend']) {
       {
         name: '成本(CNY)', type: 'line', yAxisIndex: 0, data: costs,
         smooth: true, symbol: 'circle', symbolSize: 6,
-        lineStyle: { width: 3, color: '#6366f1' },
-        itemStyle: { color: '#6366f1', borderWidth: 2, borderColor: '#fff' },
+        lineStyle: { width: 2.5, color: '#10b981', type: 'solid' },
+        itemStyle: { color: '#10b981', borderWidth: 2, borderColor: '#fff' },
         areaStyle: {
           color: {
             type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
-              { offset: 0, color: 'rgba(99,102,241,0.3)' },
-              { offset: 1, color: 'rgba(99,102,241,0.05)' }
+              { offset: 0, color: 'rgba(16,185,129,0.25)' },
+              { offset: 1, color: 'rgba(16,185,129,0.02)' }
             ]
           }
         },
-        emphasis: { focus: 'series', itemStyle: { borderWidth: 3, shadowBlur: 10, shadowColor: 'rgba(99,102,241,0.5)' } },
+        emphasis: { focus: 'series', itemStyle: { borderWidth: 3, shadowBlur: 8, shadowColor: 'rgba(16,185,129,0.4)' } },
       },
       {
         name: '输入 Token', type: 'bar', yAxisIndex: 1, data: inputs,
-        barMaxWidth: 24,
+        barMaxWidth: 28,
+        barGap: '30%',
         itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
         stack: 'tokens',
         emphasis: { focus: 'series', itemStyle: { color: '#2563eb' } },
       },
       {
         name: '输出 Token', type: 'bar', yAxisIndex: 1, data: outputs,
-        barMaxWidth: 24,
+        barMaxWidth: 28,
         itemStyle: { color: '#8b5cf6', borderRadius: [4, 4, 0, 0] },
         stack: 'tokens',
         emphasis: { focus: 'series', itemStyle: { color: '#7c3aed' } },
@@ -712,7 +730,7 @@ export default function Traces() {
       <div className="flex items-center gap-1 border-b border-gray-200 flex-shrink-0">
         {([
           { key: 'list',     icon: Activity,    label: '链路列表' },
-          { key: 'overview', icon: DollarSign,   label: '成本概览' },
+          { key: 'overview', icon: Banknote,   label: '成本概览' },
           { key: 'session',  icon: GitCommit,    label: '会话时间线' },
         ] as { key: TabType; icon: typeof Activity; label: string }[]).map(({ key, icon: Icon, label }) => (
           <button
@@ -1021,7 +1039,7 @@ export default function Traces() {
                 <StatCard
                   label="总成本"
                   value={rv ? fmtCost(rv.totalCostCny) : '-'}
-                  Icon={DollarSign}
+                  Icon={Banknote}
                   tone="blue"
                   sub={rv && rv.prevTotalCostCny > 0
                     ? <span className={cn('text-xs', rv.costChangePct >= 0 ? 'text-red-500' : 'text-emerald-500')}>
@@ -1134,7 +1152,7 @@ export default function Traces() {
               {(rv?.intentBreakdown?.length ?? 0) > 0 && (
                 <div className="card flex-shrink-0">
                   <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100">
-                    <DollarSign className="w-4 h-4 text-gray-500" />
+                    <Banknote className="w-4 h-4 text-gray-500" />
                     <h2 className="text-sm font-semibold text-gray-800">意图成本明细</h2>
                   </div>
                   <div className="overflow-x-auto">
@@ -1191,22 +1209,12 @@ export default function Traces() {
             </div>
             <button onClick={handleSessionSearch} className="btn-default">查询</button>
             {sessionFilter && (
-              <>
-                <button
-                  onClick={handleExportSnapshot}
-                  className="btn-default flex items-center gap-1.5"
-                  title="导出对话快照"
-                >
-                  <Download className="w-4 h-4" />
-                  导出快照
-                </button>
-                <button
-                  onClick={() => { setSessionFilter(''); setSessionInput('') }}
-                  className="text-xs text-gray-400 hover:text-gray-600 underline"
-                >
-                  清除
-                </button>
-              </>
+              <button
+                onClick={() => { setSessionFilter(''); setSessionInput('') }}
+                className="text-xs text-gray-400 hover:text-gray-600 underline"
+              >
+                清除
+              </button>
             )}
           </div>
           <div className="card card-body flex-1 overflow-auto">

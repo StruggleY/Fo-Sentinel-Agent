@@ -2,14 +2,11 @@ package trace
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
-	"Fo-Sentinel-Agent/utility/client"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/gconv"
@@ -116,8 +113,7 @@ func classifyError(err error) (code, errType string) {
 // asyncInsertRun 异步写入 TraceRun 初始记录（status=running）。
 // 使用 INSERT IGNORE（OnConflict DoNothing）：trace_id uniqueIndex 冲突时静默跳过，
 // 语义比 recover() 吞错更清晰。
-func asyncInsertRun(run *dao.TraceRun, snapshot string) {
-	run.ConversationSnapshot = snapshot
+func asyncInsertRun(run *dao.TraceRun) {
 	go func() {
 		defer func() { recover() }()
 		ctx := context.Background()
@@ -253,65 +249,6 @@ func asyncFinishNode(nodeID, status, errMsg, errCode, errType string, startTime,
 			onFinish()
 		}
 	}()
-}
-
-// fetchSessionSnapshot 从 Redis 读取会话最近 N 条消息序列化为 JSON 快照。
-// 失败时静默返回 ""，不阻塞主请求链路。
-// 直接使用 go-redis 客户端，避免与 cache 包循环依赖。
-func fetchSessionSnapshot(ctx context.Context, sessionID string, maxN int) string {
-	if sessionID == "" || maxN <= 0 {
-		return ""
-	}
-
-	keyPrefixVal, _ := g.Cfg().Get(ctx, "redis.chat_cache.key_prefix")
-	prefix := keyPrefixVal.String()
-	if prefix == "" {
-		prefix = "session"
-	}
-	recentKey := fmt.Sprintf("%s:%s:recent", prefix, sessionID)
-
-	snapCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	rdb, err := client.GetRedisClient(snapCtx)
-	if err != nil {
-		return ""
-	}
-
-	data, err := rdb.Get(snapCtx, recentKey).Bytes()
-	if err != nil {
-		// cache miss 或连接错误，静默返回空
-		return ""
-	}
-
-	// schema.Message JSON 格式：[{"role":"...","content":"..."},...]
-	var msgs []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal(data, &msgs); err != nil {
-		return ""
-	}
-	// 取最近 maxN 条
-	if len(msgs) > maxN {
-		msgs = msgs[len(msgs)-maxN:]
-	}
-
-	type snapItem struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-		Ts      int64  `json:"ts"`
-	}
-	now := time.Now().Unix()
-	out := make([]snapItem, len(msgs))
-	for i, m := range msgs {
-		out[i] = snapItem{Role: m.Role, Content: m.Content, Ts: now}
-	}
-	b, err := json.Marshal(out)
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
 
 // costConfig 模型定价配置（CNY/1M tokens，直接从配置读取，无需汇率转换）

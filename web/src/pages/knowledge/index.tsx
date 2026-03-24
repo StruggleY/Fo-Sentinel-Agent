@@ -4,7 +4,7 @@ import {
   Plus, Database, Trash2, Loader2, FileText, Layers,
   RefreshCw, ArrowRight, Search, Inbox,
   Upload, CheckCircle2, XCircle, Clock, X, RotateCcw,
-  Filter, Timer, Hash, AlignLeft, ChevronDown, ChevronUp,
+  Timer, Hash, AlignLeft, ChevronDown, ChevronUp,
   FlaskConical,
 } from 'lucide-react'
 import { cn } from '@/utils'
@@ -120,6 +120,9 @@ function SearchModal({ baseID, onClose }: { baseID: string; onClose: () => void 
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">直接查询向量库，验证召回效果</p>
           </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors" aria-label="关闭">
+            <X className="w-5 h-5 text-gray-500" />
+          </button>
         </div>
         <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0 space-y-3">
           <div>

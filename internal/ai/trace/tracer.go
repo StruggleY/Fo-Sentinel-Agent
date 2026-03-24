@@ -8,7 +8,6 @@ import (
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"Fo-Sentinel-Agent/utility/stringutil"
 
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/google/uuid"
 )
 
@@ -77,14 +76,6 @@ func StartRun(ctx context.Context, name, entryPoint, sessionID string, messageIn
 		Stack:     &SpanStack{},
 	}
 
-	// 读取快照消息数配置，0 表示禁用快照
-	snapshotN, _ := g.Cfg().Get(ctx, "trace.snapshot_messages")
-	n := snapshotN.Int()
-	if n == 0 {
-		n = 10 // 默认值
-	}
-	snapshot := fetchSessionSnapshot(ctx, sessionID, n)
-
 	asyncInsertRun(&dao.TraceRun{
 		TraceID:      traceID,
 		TraceName:    name,
@@ -95,7 +86,7 @@ func StartRun(ctx context.Context, name, entryPoint, sessionID string, messageIn
 		Status:       StatusRunning,
 		StartTime:    now,
 		Tags:         tagsJSON,
-	}, snapshot)
+	})
 
 	return Inject(ctx, at)
 }

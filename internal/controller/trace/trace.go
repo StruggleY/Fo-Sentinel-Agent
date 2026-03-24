@@ -103,14 +103,14 @@ func (c *ControllerV1) TokenTrend(ctx context.Context, req *v1.TokenTrendReq) (*
 	return c.service.GetTokenTrend(ctx, req.Hours)
 }
 
-// ExportSessionSnapshot 导出会话对话快照
+// ExportSessionSnapshot 导出会话对话快照（实时从 Redis 读取）
 func (c *ControllerV1) ExportSessionSnapshot(ctx context.Context, req *v1.ExportSessionSnapshotReq) (*v1.ExportSessionSnapshotRes, error) {
 	snapshot, err := c.service.GetSessionSnapshot(ctx, req.SessionId)
 	if err != nil {
+		g.Log().Warningf(ctx, "[ExportSessionSnapshot] 获取会话快照失败 | sessionId=%s | err=%v", req.SessionId, err)
 		return nil, err
 	}
 
-	// 格式化 JSON
 	var data interface{}
 	if err := json.Unmarshal([]byte(snapshot), &data); err == nil {
 		if formatted, err := json.MarshalIndent(data, "", "  "); err == nil {
@@ -124,5 +124,7 @@ func (c *ControllerV1) ExportSessionSnapshot(ctx context.Context, req *v1.Export
 	r.Response.Header().Set("Content-Type", "application/json; charset=utf-8")
 	r.Response.Write([]byte(snapshot))
 	r.Exit()
+
+	g.Log().Infof(ctx, "[ExportSessionSnapshot] 会话对话快照导出成功 | sessionId=%s | size=%d bytes", req.SessionId, len(snapshot))
 	return nil, nil
 }

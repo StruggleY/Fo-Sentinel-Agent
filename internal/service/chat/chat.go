@@ -71,9 +71,9 @@ func ExecuteDeepThink(ctx context.Context, sessionId, query string, onOutput fun
 		mem.SetMessages(schema.AssistantMessage(content, nil))
 		go func() {
 			bgCtx := context.Background()
-			if persistErr := cache.SaveSession(bgCtx, sessionId,
+			if persistErr := cache.SaveSessionWithRetry(bgCtx, sessionId,
 				mem.GetRecentMessages(), mem.GetLongTermSummary()); persistErr != nil {
-				g.Log().Errorf(bgCtx, "[Intent] 深度思考保存会话失败 | session=%s | err=%v", sessionId, persistErr)
+				g.Log().Errorf(bgCtx, "[Intent] 深度思考保存会话失败（已重试） | session=%s | err=%v", sessionId, persistErr)
 			}
 		}()
 	}

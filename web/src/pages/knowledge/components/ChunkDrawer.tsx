@@ -21,7 +21,7 @@ export default function ChunkDrawer({ docID, docName, onClose }: Props) {
     const fetch = async () => {
       try {
         setLoading(true)
-        const res = await knowledgeService.listChunk(docID, page, PAGE_SIZE)
+        const res = await knowledgeService.listChunk(docID, { page, pageSize: PAGE_SIZE })
         setChunks(res.list)
         setTotal(res.total)
       } catch {

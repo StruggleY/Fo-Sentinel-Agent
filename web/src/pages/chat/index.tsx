@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Loader2, ListChecks, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, ListChecks, ThumbsUp, ThumbsDown, Pencil, Copy, Check } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { normalizeMarkdown, cn } from '@/utils'
@@ -38,6 +38,9 @@ export default function Chat() {
   const [webSearch, setWebSearch] = useState(() => localStorage.getItem('chat_web_search') === 'true')
   // 记录每条消息的点赞/踩状态（key = message index）
   const [votes, setVotes] = useState<Record<number, 1 | -1>>({})
+  // 编辑状态：记录正在编辑的消息索引和编辑内容
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editingContent, setEditingContent] = useState('')
 
   const chatScrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -184,6 +187,55 @@ export default function Chat() {
       if (updated.length > 0) handleSelectSession(updated[0].id)
       else { setCurrentSessionId(''); setMessages([]) }
     }
+  }
+
+  const handleExportSession = (sid: string) => {
+    chatService.exportSession(sid)
+  }
+
+  // 开始编辑消息
+  const handleStartEdit = (index: number, content: string) => {
+    setEditingIndex(index)
+    setEditingContent(content)
+  }
+
+  // 取消编辑
+  const handleCancelEdit = () => {
+    setEditingIndex(null)
+    setEditingContent('')
+  }
+
+  // 保存编辑（删除该消息之后的所有内容，重新发送）
+  const handleSaveEdit = async (index: number) => {
+    if (!currentSessionId || !editingContent.trim()) return
+
+    // 删除该消息及之后的所有消息
+    const newMessages = messages.slice(0, index)
+    setMessages(newMessages)
+    saveMessages(currentSessionId, newMessages)
+
+    // 清空编辑状态和投票记录
+    setEditingIndex(null)
+    setEditingContent('')
+    const newVotes: Record<number, 1 | -1> = {}
+    Object.keys(votes).forEach(k => {
+      const idx = parseInt(k)
+      if (idx < index) newVotes[idx] = votes[idx]
+    })
+    setVotes(newVotes)
+    localStorage.setItem(`chat_votes_${currentSessionId}`, JSON.stringify(newVotes))
+
+    // 调用后端回滚API
+    try {
+      console.log('[编辑] 调用回滚 API', { sessionId: currentSessionId, targetIndex: index - 1 })
+      const result = await chatService.rollbackSession(currentSessionId, index - 1)
+      console.log('[编辑] 回滚成功', result)
+    } catch (err) {
+      console.error('[编辑] 回滚失败:', err)
+    }
+
+    // 重新发送编辑后的消息
+    handleSend(editingContent.trim())
   }
 
   // ── 发送消息（overrideText 来自技能卡片或事件跳转） ──────────────────────────
@@ -410,6 +462,7 @@ export default function Chat() {
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
+        onExportSession={handleExportSession}
       />
 
       {/* 右侧主区域 */}
@@ -457,7 +510,7 @@ export default function Chat() {
               ref={chatScrollRef}
               className="relative flex-1 min-h-0 overflow-y-auto chat-sidebar-scroll"
             >
-              <div className="max-w-[760px] ml-[max(32px,calc(50vw-660px))] px-6 py-8 space-y-6">
+              <div className="max-w-[760px] ml-[max(32px,calc(50vw-660px))] px-6 py-8 space-y-3">
                 {messages.map((m, i) => (
                   <MessageBubble
                     key={m.id}
@@ -466,6 +519,12 @@ export default function Chat() {
                     messageIndex={i}
                     vote={votes[i]}
                     onVote={submitFeedback}
+                    isEditing={editingIndex === i}
+                    editingContent={editingIndex === i ? editingContent : ''}
+                    onStartEdit={handleStartEdit}
+                    onCancelEdit={handleCancelEdit}
+                    onSaveEdit={handleSaveEdit}
+                    onEditingContentChange={setEditingContent}
                   />
                 ))}
                 <div ref={messagesEndRef} />
@@ -507,20 +566,123 @@ interface MessageBubbleProps {
   messageIndex: number
   vote?: 1 | -1
   onVote: (messageIndex: number, vote: 1 | -1) => void
+  isEditing: boolean
+  editingContent: string
+  onStartEdit: (index: number, content: string) => void
+  onCancelEdit: () => void
+  onSaveEdit: (index: number) => void
+  onEditingContentChange: (content: string) => void
 }
 
-function MessageBubble({ message, isLast, messageIndex, vote, onVote }: MessageBubbleProps) {
+function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing, editingContent, onStartEdit, onCancelEdit, onSaveEdit, onEditingContentChange }: MessageBubbleProps) {
+  const [copied, setCopied] = useState(false)
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const adjustEditHeight = useCallback(() => {
+    const el = editTextareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }, [])
+
+  useEffect(() => { if (isEditing) adjustEditHeight() }, [isEditing, editingContent, adjustEditHeight])
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('复制失败:', err)
+    }
+  }
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end mb-6">
-        <div
-          className="max-w-[72%] rounded-3xl rounded-br-lg px-5 py-3 text-sm leading-relaxed text-white"
-          style={{
-            background: 'linear-gradient(135deg, #3B82F6 0%, #6366F1 100%)',
-            boxShadow: '0 2px 12px rgba(59,130,246,0.25)',
-          }}
-        >
-          {message.content}
+      <div className="flex justify-end mb-4 group">
+        <div className="relative max-w-[72%] inline-flex flex-col items-end gap-1">
+          {isEditing ? (
+            // 编辑模式：在原先气泡内，横条样式，取消/发送在右下角
+            <div
+              className="rounded-3xl rounded-br-lg px-5 py-2.5 flex flex-col gap-2 w-full min-w-[670px]"
+              style={{
+                background: 'linear-gradient(135deg, #3B82F6 0%, #6366F1 100%)',
+                boxShadow: '0 2px 12px rgba(59,130,246,0.25)',
+              }}
+            >
+              <textarea
+                ref={editTextareaRef}
+                value={editingContent}
+                onChange={(e) => { onEditingContentChange(e.target.value); adjustEditHeight() }}
+                className="w-full min-w-0 bg-transparent text-white text-sm leading-relaxed placeholder-white/60 focus:outline-none resize-none py-0.5 overflow-y-auto"
+                rows={1}
+                placeholder="输入消息..."
+                autoFocus
+                style={{ minHeight: 24 }}
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onCancelEdit}
+                  className="px-4 py-2 text-xs font-medium text-white/95 hover:text-white border border-white/30 hover:border-white/50 hover:bg-white/15 rounded-full transition-all duration-200 active:scale-[0.98]"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSaveEdit(messageIndex)}
+                  disabled={!editingContent.trim()}
+                  className="px-4 py-2 text-xs font-medium text-indigo-600 bg-white hover:bg-indigo-50 shadow-sm hover:shadow rounded-full transition-all duration-200 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-white disabled:hover:shadow-sm disabled:cursor-not-allowed disabled:active:scale-100"
+                >
+                  发送
+                </button>
+              </div>
+            </div>
+          ) : (
+            // 显示模式
+            <>
+              <div
+                className="rounded-3xl rounded-br-lg px-5 py-3 text-sm leading-relaxed text-white"
+                style={{
+                  background: 'linear-gradient(135deg, #3B82F6 0%, #6366F1 100%)',
+                  boxShadow: '0 2px 12px rgba(59,130,246,0.25)',
+                }}
+              >
+                {message.content}
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="relative group/copy">
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="p-1.5 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                  >
+                    {copied ? (
+                      <Check className="w-3.5 h-3.5 flex-shrink-0 text-green-600" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5 flex-shrink-0" />
+                    )}
+                  </button>
+                  <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1F2937] px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover/copy:opacity-100">
+                    {copied ? '已复制' : '复制'}
+                    <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1F2937]" />
+                  </div>
+                </div>
+                <div className="relative group/edit">
+                  <button
+                    type="button"
+                    onClick={() => onStartEdit(messageIndex, message.content)}
+                    className="p-1.5 rounded-full text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                  >
+                    <Pencil className="w-3.5 h-3.5 flex-shrink-0" />
+                  </button>
+                  <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1F2937] px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover/edit:opacity-100">
+                    编辑
+                    <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1F2937]" />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     )
@@ -528,7 +690,7 @@ function MessageBubble({ message, isLast, messageIndex, vote, onVote }: MessageB
 
   // assistant
   return (
-    <div className="flex items-start gap-3 mb-6">
+    <div className="flex items-start gap-3 mb-1">
       {/* AI 头像 */}
       <div
         className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white mt-1"
@@ -560,30 +722,32 @@ function MessageBubble({ message, isLast, messageIndex, vote, onVote }: MessageB
 
         {/* 主内容 */}
         {message.content ? (
-          <div className="rounded-3xl rounded-tl-lg border border-[#F0F0F0] bg-white px-5 py-3.5 shadow-[0_1px_6px_rgba(0,0,0,0.05)]">
-            <div className="chat-markdown text-sm leading-relaxed text-[#1F2937]">
-              {isLast && message.isStreaming ? (
-                <>
+          <div className="inline-flex flex-col items-start gap-1">
+            <div className="rounded-3xl rounded-tl-lg border border-[#F0F0F0] bg-white px-5 py-3.5 shadow-[0_1px_6px_rgba(0,0,0,0.05)]">
+              <div className="chat-markdown text-sm leading-relaxed text-[#1F2937]">
+                {isLast && message.isStreaming ? (
+                  <>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {normalizeMarkdown(message.content)}
+                    </ReactMarkdown>
+                    <span className="inline-block h-4 w-1.5 animate-pulse bg-[#3B82F6] ml-0.5 rounded-sm align-text-bottom" />
+                  </>
+                ) : (
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {normalizeMarkdown(message.content)}
                   </ReactMarkdown>
-                  <span className="inline-block h-4 w-1.5 animate-pulse bg-[#3B82F6] ml-0.5 rounded-sm align-text-bottom" />
-                </>
-              ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {normalizeMarkdown(message.content)}
-                </ReactMarkdown>
-              )}
+                )}
+              </div>
             </div>
-            {/* 点赞/踩按钮（流式完成后显示） */}
+            {/* 点赞/踩按钮（流式完成后显示，置于气泡左下角下方） */}
             {!message.isStreaming && (
-              <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-50">
+              <div className="flex items-center gap-1">
                 <div className="relative group/like">
                   <button
                     onClick={() => onVote(messageIndex, 1)}
                     className={cn(
-                      'p-1 rounded hover:bg-emerald-50 transition-colors',
-                      vote === 1 ? 'text-emerald-600' : 'text-gray-300 hover:text-emerald-500',
+                      'p-1.5 rounded-full hover:bg-emerald-50 transition-colors',
+                      vote === 1 ? 'text-emerald-600' : 'text-gray-500 hover:text-emerald-500',
                     )}
                   >
                     <ThumbsUp className="w-3.5 h-3.5" />
@@ -597,8 +761,8 @@ function MessageBubble({ message, isLast, messageIndex, vote, onVote }: MessageB
                   <button
                     onClick={() => onVote(messageIndex, -1)}
                     className={cn(
-                      'p-1 rounded hover:bg-red-50 transition-colors',
-                      vote === -1 ? 'text-red-500' : 'text-gray-300 hover:text-red-400',
+                      'p-1.5 rounded-full hover:bg-red-50 transition-colors',
+                      vote === -1 ? 'text-red-500' : 'text-gray-500 hover:text-red-400',
                     )}
                   >
                     <ThumbsDown className="w-3.5 h-3.5" />

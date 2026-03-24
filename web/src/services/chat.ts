@@ -166,4 +166,18 @@ export const chatService = {
     const d = res.data.data
     return { file_id: d.filePath || d.fileName, filename: d.fileName }
   },
+
+  // 导出会话快照
+  exportSession: (sessionId: string) => {
+    window.open(`/api/trace/v1/export_session_snapshot?sessionId=${sessionId}`, '_blank')
+  },
+
+  // 回溯会话
+  async rollbackSession(sessionId: string, targetIndex: number): Promise<{ success: boolean; removedCount: number }> {
+    const res = await api.post<ApiResponse<{ success: boolean; rolledBackTo: number; removedCount: number }>>(
+      '/chat/v1/rollback',
+      { sessionId, targetIndex }
+    )
+    return { success: res.data.data.success, removedCount: res.data.data.removedCount }
+  },
 }

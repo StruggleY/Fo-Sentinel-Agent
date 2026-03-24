@@ -274,21 +274,20 @@ func calcP95(durations []int64) int64 {
 // toTraceRunVO 模型转 VO
 func toTraceRunVO(r *dao.TraceRun) v1.TraceRunVO {
 	return v1.TraceRunVO{
-		TraceId:              r.TraceID,
-		TraceName:            r.TraceName,
-		EntryPoint:           r.EntryPoint,
-		Status:               r.Status,
-		DurationMs:           r.DurationMs,
-		StartTime:            r.StartTime.Format("2006-01-02T15:04:05.000Z07:00"),
-		SessionId:            r.SessionID,
-		QueryText:            r.QueryText,
-		TotalInputTokens:     r.TotalInputTokens,
-		TotalOutputTokens:    r.TotalOutputTokens,
-		EstimatedCostCNY:     r.EstimatedCostCNY,
-		ErrorCode:            r.ErrorCode,
-		ErrorMessage:         r.ErrorMessage,
-		Tags:                 r.Tags,
-		ConversationSnapshot: r.ConversationSnapshot,
+		TraceId:           r.TraceID,
+		TraceName:         r.TraceName,
+		EntryPoint:        r.EntryPoint,
+		Status:            r.Status,
+		DurationMs:        r.DurationMs,
+		StartTime:         r.StartTime.Format("2006-01-02T15:04:05.000Z07:00"),
+		SessionId:         r.SessionID,
+		QueryText:         r.QueryText,
+		TotalInputTokens:  r.TotalInputTokens,
+		TotalOutputTokens: r.TotalOutputTokens,
+		EstimatedCostCNY:  r.EstimatedCostCNY,
+		ErrorCode:         r.ErrorCode,
+		ErrorMessage:      r.ErrorMessage,
+		Tags:              r.Tags,
 	}
 }
 
@@ -319,7 +318,7 @@ func toTraceNodeVO(n *dao.TraceNode) v1.TraceNodeVO {
 	}
 }
 
-// GetSessionSnapshot 获取会话对话快照（从 Redis 读取）
+// GetSessionSnapshot 实时从 Redis 读取会话对话快照
 func (s *Service) GetSessionSnapshot(ctx context.Context, sessionID string) (string, error) {
 	return redisdao.GetSessionSnapshot(ctx, sessionID)
 }

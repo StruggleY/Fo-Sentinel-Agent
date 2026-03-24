@@ -68,7 +68,7 @@ export default function DocList({ baseID }: Props) {
     if (!baseID) return
     try {
       setLoading(true)
-      const res = await knowledgeService.listDoc(baseID, page, PAGE_SIZE)
+      const res = await knowledgeService.listDoc(baseID, { page, pageSize: PAGE_SIZE })
       setDocs(res.list)
       setTotal(res.total)
     } catch {

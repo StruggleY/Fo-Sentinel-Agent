@@ -312,6 +312,11 @@ export interface TrendData {
 // ==================== 文件上传配置类型 ====================
 export interface UploadConfig {
   strategy: 'fixed_size' | 'structure_aware' | 'hierarchical'
+  chunk_size?: number
+  overlap_size?: number
+  target_chars?: number
+  max_chars?: number
+  min_chars?: number
 }
 
 // ==================== 审计日志类型 ====================

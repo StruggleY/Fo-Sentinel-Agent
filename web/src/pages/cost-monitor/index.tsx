@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  DollarSign, TrendingUp, TrendingDown, Zap, RefreshCw,
-  Loader2, BarChart2, Cpu, Tag, CalendarDays,
+  TrendingUp, TrendingDown, Zap, RefreshCw,
+  Loader2, BarChart2, Cpu, Tag, CalendarDays, DollarSign,
 } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import { cn } from '@/utils'
@@ -15,10 +15,10 @@ import {
 // ── 格式化工具 ─────────────────────────────────────────────────────────────────
 
 function fmtCost(usd: number): string {
-  if (usd === 0) return '$0.000'
-  if (usd < 0.001) return `$${(usd * 1000).toFixed(3)}m`
-  if (usd < 1) return `$${usd.toFixed(4)}`
-  return `$${usd.toFixed(3)}`
+  if (usd === 0) return '0.000'
+  if (usd < 0.001) return `${(usd * 1000).toFixed(3)}m`
+  if (usd < 1) return `${usd.toFixed(4)}`
+  return `${usd.toFixed(3)}`
 }
 
 function fmtTokens(n: number): string {
@@ -41,75 +41,132 @@ const RANGES: { value: Range; label: string; days: number; hours?: number }[] = 
   { value: '90d', label: '90 天', days: 90 },
 ]
 
+// ── 日期格式化（ISO → MM-DD）─────────────────────────────────────────────────────
+function formatChartDate(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${m}-${day}`
+  } catch {
+    return iso.slice(0, 10)
+  }
+}
+
 // ── ECharts 配置 ───────────────────────────────────────────────────────────────
 
 function buildDailyTrendOption(data: CostOverview['dailyTrend']) {
-  const dates = data.map(d => d.date)
-  const costs  = data.map(d => +(d.costUsd).toFixed(4))
-  const inputs  = data.map(d => d.inputTokens)
+  const rawDates = data.map(d => d.date)
+  const dates = rawDates.map(formatChartDate)
+  const costs = data.map(d => +(d.costCny).toFixed(4))
+  const inputs = data.map(d => d.inputTokens)
   const outputs = data.map(d => d.outputTokens)
-  const cached  = data.map(d => d.cachedTokens)
 
   return {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'cross', crossStyle: { color: '#e2e8f0' } },
+      backgroundColor: 'rgba(255,255,255,0.96)',
+      borderColor: '#e5e7eb',
+      borderWidth: 1,
+      padding: [10, 14],
+      textStyle: { color: '#374151', fontSize: 12 },
+      axisPointer: { type: 'cross', crossStyle: { color: '#cbd5e1', width: 1 } },
       formatter(params: any[]) {
-        const date = params[0]?.axisValue || ''
-        const lines = params.map((p: any) => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>${p.seriesName}: <b>${p.value}</b>`).join('<br/>')
-        return `<div style="font-size:12px"><b>${date}</b><br/>${lines}</div>`
+        const idx = params[0]?.dataIndex ?? 0
+        const dateStr = formatChartDate(rawDates[idx] || '')
+        const lines = params.map((p: any) => {
+          const val = p.seriesName === '成本(CNY)' ? `¥${p.value}` : fmtTokens(p.value)
+          return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="display:inline-block;width:10px;height:3px;border-radius:2px;background:${p.color}"></span>
+              <span style="color:#6b7280">${p.seriesName}</span>
+            </span>
+            <span style="font-weight:600;color:#111827">${val}</span>
+          </div>`
+        }).join('')
+        return `<div style="min-width:180px"><div style="font-weight:600;color:#111827;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb">${dateStr}</div>${lines}</div>`
       },
     },
     legend: {
       bottom: 0,
       textStyle: { color: '#6b7280', fontSize: 11 },
-      itemHeight: 8,
-      data: ['成本(USD)', '输入 Token', '输出 Token', '缓存 Token'],
+      itemWidth: 14,
+      itemHeight: 10,
+      itemGap: 16,
+      data: ['成本(CNY)', '输入 Token', '输出 Token'],
     },
-    grid: { top: 20, left: 60, right: 60, bottom: 50 },
+    grid: { top: 30, left: 65, right: 65, bottom: 50 },
     xAxis: {
-      type: 'category', data: dates, boundaryGap: false,
+      type: 'category',
+      data: dates,
+      boundaryGap: true,
       axisLine: { lineStyle: { color: '#e5e7eb' } },
-      axisLabel: { color: '#9ca3af', fontSize: 11 },
+      axisLabel: { color: '#6b7280', fontSize: 11, margin: 10, interval: 0 },
+      axisTick: { show: true, lineStyle: { color: '#e5e7eb' } },
       splitLine: { show: false },
     },
     yAxis: [
       {
-        type: 'value', name: 'USD', nameTextStyle: { color: '#9ca3af', fontSize: 10 },
-        axisLabel: { color: '#9ca3af', fontSize: 10, formatter: (v: number) => `$${v}` },
-        splitLine: { lineStyle: { color: '#f3f4f6', type: 'dashed' } },
+        type: 'value',
+        name: '¥',
+        nameTextStyle: { color: '#6b7280', fontSize: 10 },
+        axisLabel: { color: '#6b7280', fontSize: 10, formatter: (v: number) => `¥${v}` },
+        splitLine: { lineStyle: { color: '#f3f4f6', type: 'dashed', width: 1 } },
         position: 'left',
       },
       {
-        type: 'value', name: 'Tokens', nameTextStyle: { color: '#9ca3af', fontSize: 10 },
-        axisLabel: { color: '#9ca3af', fontSize: 10, formatter: (v: number) => fmtTokens(v) },
+        type: 'value',
+        name: 'Tokens',
+        nameTextStyle: { color: '#6b7280', fontSize: 10 },
+        axisLabel: { color: '#6b7280', fontSize: 10, formatter: (v: number) => fmtTokens(v) },
         splitLine: { show: false },
         position: 'right',
       },
     ],
     series: [
       {
-        name: '成本(USD)', type: 'line', yAxisIndex: 0, data: costs,
-        smooth: true, symbol: 'circle', symbolSize: 5,
-        lineStyle: { width: 2, color: '#6366f1' },
-        itemStyle: { color: '#6366f1' },
-        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(99,102,241,0.2)' }, { offset: 1, color: 'rgba(99,102,241,0)' }] } },
+        name: '成本(CNY)',
+        type: 'line',
+        yAxisIndex: 0,
+        data: costs,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { width: 2.5, color: '#10b981', type: 'solid' },
+        itemStyle: { color: '#10b981', borderWidth: 2, borderColor: '#fff' },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(16,185,129,0.25)' },
+              { offset: 1, color: 'rgba(16,185,129,0.02)' },
+            ],
+          },
+        },
+        emphasis: { focus: 'series', itemStyle: { borderWidth: 3, shadowBlur: 8, shadowColor: 'rgba(16,185,129,0.4)' } },
       },
       {
-        name: '输入 Token', type: 'bar', yAxisIndex: 1, data: inputs,
-        barMaxWidth: 20, itemStyle: { color: 'rgba(59,130,246,0.7)', borderRadius: [2, 2, 0, 0] },
+        name: '输入 Token',
+        type: 'bar',
+        yAxisIndex: 1,
+        data: inputs,
+        barMaxWidth: 28,
+        barGap: '30%',
+        itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
         stack: 'tokens',
+        emphasis: { focus: 'series', itemStyle: { color: '#2563eb' } },
       },
       {
-        name: '输出 Token', type: 'bar', yAxisIndex: 1, data: outputs,
-        barMaxWidth: 20, itemStyle: { color: 'rgba(139,92,246,0.7)', borderRadius: [0, 0, 0, 0] },
+        name: '输出 Token',
+        type: 'bar',
+        yAxisIndex: 1,
+        data: outputs,
+        barMaxWidth: 28,
+        itemStyle: { color: '#8b5cf6', borderRadius: [4, 4, 0, 0] },
         stack: 'tokens',
-      },
-      {
-        name: '缓存 Token', type: 'bar', yAxisIndex: 1, data: cached,
-        barMaxWidth: 20, itemStyle: { color: 'rgba(16,185,129,0.7)', borderRadius: [2, 2, 0, 0] },
-        stack: 'tokens',
+        emphasis: { focus: 'series', itemStyle: { color: '#7c3aed' } },
       },
     ],
   }
@@ -119,7 +176,7 @@ function buildTokenTrendOption(points: TokenTrendPoint[]) {
   const hours   = points.map(p => p.hour.slice(11)) // "HH"
   const inputs  = points.map(p => p.inputTokens)
   const outputs = points.map(p => p.outputTokens)
-  const cached  = points.map(p => p.cachedTokens)
+  const cached  = points.map(p => p.inputTokens)
   const reqs    = points.map(p => p.requestCount)
 
   return {
@@ -178,7 +235,7 @@ function buildTokenTrendOption(points: TokenTrendPoint[]) {
 function buildModelPieOption(items: CostOverview['modelBreakdown']) {
   const data = items.map(m => ({
     name: m.modelName || '未知模型',
-    value: +m.totalCostUsd.toFixed(5),
+    value: +m.totalCostCny.toFixed(5),
   }))
   return {
     backgroundColor: 'transparent',
@@ -206,7 +263,7 @@ function buildModelPieOption(items: CostOverview['modelBreakdown']) {
 
 function buildIntentBarOption(items: CostOverview['intentBreakdown']) {
   const names = items.map(i => i.traceName || '未知')
-  const costs = items.map(i => +i.totalCostUsd.toFixed(5))
+  const costs = items.map(i => +i.totalCostCny.toFixed(5))
   const reqs  = items.map(i => i.requestCount)
 
   return {
@@ -218,14 +275,14 @@ function buildIntentBarOption(items: CostOverview['intentBreakdown']) {
         const name = params[0]?.axisValue || ''
         const cost = params[0]?.value ?? 0
         const req  = params[1]?.value ?? 0
-        return `<div style="font-size:12px"><b>${name}</b><br/>成本: $${cost}<br/>请求数: ${req}</div>`
+        return `<div style="font-size:12px"><b>${name}</b><br/>成本: ¥${cost}<br/>请求数: ${req}</div>`
       },
     },
     grid: { top: 15, left: 120, right: 55, bottom: 20 },
     xAxis: [
       {
         type: 'value',
-        axisLabel: { color: '#9ca3af', fontSize: 10, formatter: (v: number) => `$${v}` },
+        axisLabel: { color: '#9ca3af', fontSize: 10, formatter: (v: number) => `¥${v}` },
         splitLine: { lineStyle: { color: '#f3f4f6', type: 'dashed' } },
       },
       {
@@ -358,10 +415,10 @@ export default function CostMonitor() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 flex-shrink-0">
             <StatCard
               label="总成本"
-              value={rv ? fmtCost(rv.totalCostUsd) : '-'}
+              value={rv ? fmtCost(rv.totalCostCny) : '-'}
               Icon={DollarSign}
               tone="blue"
-              sub={rv && rv.prevTotalCostUsd > 0
+              sub={rv && rv.prevTotalCostCny > 0
                 ? <span className={cn('text-xs', rv.costChangePct >= 0 ? 'text-red-500' : 'text-emerald-500')}>
                     {fmtPct(rv.costChangePct)} 较上周期
                   </span>
@@ -384,11 +441,11 @@ export default function CostMonitor() {
             />
             <StatCard
               label="缓存节省"
-              value={rv ? fmtTokens(rv.totalCachedTokens ?? 0) : '-'}
+              value={rv ? fmtTokens(rv.totalInputTokens ?? 0) : '-'}
               Icon={TrendingDown}
               tone="emerald"
-              sub={rv && (rv.totalInputTokens + rv.totalCachedTokens) > 0
-                ? `节省率 ${((rv.totalCachedTokens / (rv.totalInputTokens + rv.totalCachedTokens)) * 100).toFixed(1)}%`
+              sub={rv && (rv.totalInputTokens + rv.totalInputTokens) > 0
+                ? `节省率 ${((rv.totalInputTokens / (rv.totalInputTokens + rv.totalInputTokens)) * 100).toFixed(1)}%`
                 : undefined
               }
             />
@@ -454,7 +511,7 @@ export default function CostMonitor() {
               </div>
               {(rv?.modelBreakdown?.length ?? 0) > 0 ? (
                 <>
-                  {rv!.modelBreakdown.every(m => m.totalCostUsd === 0) ? (
+                  {rv!.modelBreakdown.every(m => m.totalCostCny === 0) ? (
                     <div className="flex flex-col items-center justify-center h-[200px] text-sm text-gray-400 gap-2">
                       <span>模型成本数据待采集</span>
                       <span className="text-xs text-gray-300">节点级成本将在下次请求后更新</span>
@@ -472,7 +529,7 @@ export default function CostMonitor() {
                       <div key={i} className="flex items-center gap-2 text-xs">
                         <span className="flex-1 text-gray-700 truncate" title={m.modelName}>{m.modelName || '未知'}</span>
                         <span className="text-gray-400 tabular-nums">↑{fmtTokens(m.inputTokens)} ↓{fmtTokens(m.outputTokens)}</span>
-                        <span className="text-indigo-600 font-medium w-16 text-right tabular-nums">{fmtCost(m.totalCostUsd)}</span>
+                        <span className="text-indigo-600 font-medium w-16 text-right tabular-nums">{fmtCost(m.totalCostCny)}</span>
                         <span className="text-gray-400 w-10 text-right tabular-nums">{m.costPct.toFixed(1)}%</span>
                       </div>
                     ))}
@@ -522,8 +579,8 @@ export default function CostMonitor() {
                       <tr key={i} className="hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-2.5 text-gray-800 font-medium">{item.traceName || '—'}</td>
                         <td className="px-4 py-2.5 text-gray-600 tabular-nums">{item.requestCount}</td>
-                        <td className="px-4 py-2.5 text-indigo-600 font-medium tabular-nums">{fmtCost(item.totalCostUsd)}</td>
-                        <td className="px-4 py-2.5 text-gray-600 tabular-nums">{fmtCost(item.avgCostUsd)}</td>
+                        <td className="px-4 py-2.5 text-indigo-600 font-medium tabular-nums">{fmtCost(item.totalCostCny)}</td>
+                        <td className="px-4 py-2.5 text-gray-600 tabular-nums">{fmtCost(item.avgCostCny)}</td>
                         <td className="px-4 py-2.5 text-blue-600 tabular-nums">—</td>
                         <td className="px-4 py-2.5 text-violet-600 tabular-nums">—</td>
                         <td className="px-4 py-2.5">

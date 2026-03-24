@@ -21,21 +21,20 @@ type ListRes struct {
 
 // TraceRunVO 链路运行记录 VO（视图对象）
 type TraceRunVO struct {
-	TraceId              string  `json:"traceId"`
-	TraceName            string  `json:"traceName"`
-	EntryPoint           string  `json:"entryPoint"`
-	Status               string  `json:"status"`
-	DurationMs           int64   `json:"durationMs"`
-	StartTime            string  `json:"startTime"`
-	SessionId            string  `json:"sessionId"`
-	QueryText            string  `json:"queryText"`
-	TotalInputTokens     int     `json:"totalInputTokens"`
-	TotalOutputTokens    int     `json:"totalOutputTokens"`
-	EstimatedCostCNY     float64 `json:"estimatedCostCny"`
-	ErrorCode            string  `json:"errorCode,omitempty"`
-	ErrorMessage         string  `json:"errorMessage,omitempty"`
-	Tags                 string  `json:"tags"`
-	ConversationSnapshot string  `json:"conversationSnapshot,omitempty"`
+	TraceId           string  `json:"traceId"`
+	TraceName         string  `json:"traceName"`
+	EntryPoint        string  `json:"entryPoint"`
+	Status            string  `json:"status"`
+	DurationMs        int64   `json:"durationMs"`
+	StartTime         string  `json:"startTime"`
+	SessionId         string  `json:"sessionId"`
+	QueryText         string  `json:"queryText"`
+	TotalInputTokens  int     `json:"totalInputTokens"`
+	TotalOutputTokens int     `json:"totalOutputTokens"`
+	EstimatedCostCNY  float64 `json:"estimatedCostCny"`
+	ErrorCode         string  `json:"errorCode,omitempty"`
+	ErrorMessage      string  `json:"errorMessage,omitempty"`
+	Tags              string  `json:"tags"`
 }
 
 // DetailReq 链路详情请求
@@ -217,7 +216,7 @@ type TokenTrendRes struct {
 	Points []TokenTrendPoint `json:"points"`
 }
 
-// ExportSessionSnapshotReq 导出会话对话快照请求
+// ExportSessionSnapshotReq 导出会话对话快照请求（实时从 Redis 读取）
 type ExportSessionSnapshotReq struct {
 	g.Meta    `path:"/trace/v1/export_session_snapshot" method:"GET"`
 	SessionId string `json:"sessionId" v:"required"`

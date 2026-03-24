@@ -3,10 +3,18 @@ package milvus
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/gogf/gf/v2/frame/g"
 	cli "github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
+)
+
+const (
+	maxRetries = 24 // 最多重试次数
+	retryDelay = 5 * time.Second
 )
 
 var (
@@ -14,6 +22,18 @@ var (
 	clientOnce    sync.Once
 	clientInitErr error
 )
+
+// isRetryableErr 判断是否为可重试的连接错误（Milvus 未就绪等）。
+func isRetryableErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "not ready") ||
+		strings.Contains(s, "service unavailable") ||
+		strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "connection reset")
+}
 
 // GetClient 返回全局单例 Milvus 客户端（懒初始化，线程安全）。
 func GetClient(ctx context.Context) (cli.Client, error) {
@@ -24,8 +44,33 @@ func GetClient(ctx context.Context) (cli.Client, error) {
 }
 
 // NewClient 连接 Milvus，确保目标数据库与集合存在并已加载到内存。
+// 当 Milvus Proxy 未就绪时自动重试（最长约 2 分钟），兼容 Docker 启动较慢场景。
 // 初始化顺序：连接 default DB → 创建 sentinel DB（不存在时）→ 建集合+索引（不存在时）→ 创建分区 → 加载集合。
 func NewClient(ctx context.Context) (cli.Client, error) {
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		client, err := newClientOnce(ctx)
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
+		if !isRetryableErr(err) {
+			return nil, err
+		}
+		if attempt < maxRetries-1 {
+			g.Log().Infof(ctx, "[milvus] 连接未就绪，%v 秒后重试 (%d/%d): %v", retryDelay.Seconds(), attempt+1, maxRetries, err)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(retryDelay):
+				// 等待后重试
+			}
+		}
+	}
+	return nil, fmt.Errorf("Milvus 连接超时（已重试 %d 次）: %w", maxRetries, lastErr)
+}
+
+func newClientOnce(ctx context.Context) (cli.Client, error) {
 	// 必须先通过 default DB 创建目标数据库
 	defaultClient, err := cli.NewClient(ctx, cli.Config{Address: "localhost:19530", DBName: "default"})
 	if err != nil {

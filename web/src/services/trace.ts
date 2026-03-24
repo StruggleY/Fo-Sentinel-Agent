@@ -16,14 +16,13 @@ export interface TraceRun {
   errorCode?: string
   errorMessage?: string
   tags: string
-  conversationSnapshot?: string
 }
 
 // TraceNode 链路节点记录
 export interface TraceNode {
   nodeId: string
   parentNodeId: string
-  nodeType: 'LLM' | 'TOOL' | 'RETRIEVER' | 'LAMBDA' | 'AGENT' | 'CACHE' | 'EMBEDDING'
+  nodeType: 'LLM' | 'TOOL' | 'RETRIEVER' | 'LAMBDA' | 'AGENT' | 'CACHE' | 'EMBEDDING' | 'RERANK'
   nodeName: string
   depth: number
   status: 'running' | 'success' | 'error'
@@ -185,7 +184,7 @@ export const traceService = {
     return res.data?.data || { points: [] }
   },
 
-  // 导出会话对话快照
+  // 导出会话对话快照（实时从 Redis 读取）
   async exportSessionSnapshot(sessionId: string): Promise<void> {
     const res = await fetch(`/api/trace/v1/export_session_snapshot?sessionId=${encodeURIComponent(sessionId)}`, {
       headers: {

@@ -93,26 +93,25 @@ func (QueryTermMapping) TableName() string { return "query_term_mappings" }
 
 // TraceRun 全链路运行记录（1条/请求）
 type TraceRun struct {
-	ID                   uint       `gorm:"primaryKey;autoIncrement"`
-	TraceID              string     `gorm:"column:trace_id;size:36;uniqueIndex;not null"`
-	TraceName            string     `gorm:"column:trace_name;size:200"`
-	EntryPoint           string     `gorm:"column:entry_point;size:200"`
-	SessionID            string     `gorm:"column:session_id;size:100;index"`
-	MessageIndex         int        `gorm:"column:message_index;default:0"`
-	QueryText            string     `gorm:"column:query_text;type:text"`
-	Status               string     `gorm:"column:status;size:20;default:running"`
-	ErrorMessage         string     `gorm:"column:error_message;size:1000"`
-	ErrorCode            string     `gorm:"column:error_code;size:50"`
-	StartTime            time.Time  `gorm:"column:start_time;type:datetime(3)"`
-	EndTime              *time.Time `gorm:"column:end_time;type:datetime(3)"`
-	DurationMs           int64      `gorm:"column:duration_ms"`
-	TotalInputTokens     int        `gorm:"column:total_input_tokens;default:0"`
-	TotalOutputTokens    int        `gorm:"column:total_output_tokens;default:0"`
-	EstimatedCostCNY     float64    `gorm:"column:estimated_cost_cny;type:decimal(10,6)"`
-	Tags                 string     `gorm:"column:tags;type:text"`
-	ConversationSnapshot string     `gorm:"column:conversation_snapshot;type:mediumtext"`
-	CreatedAt            time.Time  `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt            time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+	ID                uint       `gorm:"primaryKey;autoIncrement"`
+	TraceID           string     `gorm:"column:trace_id;size:36;uniqueIndex;not null"`
+	TraceName         string     `gorm:"column:trace_name;size:200"`
+	EntryPoint        string     `gorm:"column:entry_point;size:200"`
+	SessionID         string     `gorm:"column:session_id;size:100;index"`
+	MessageIndex      int        `gorm:"column:message_index;default:0"`
+	QueryText         string     `gorm:"column:query_text;type:text"`
+	Status            string     `gorm:"column:status;size:20;default:running"`
+	ErrorMessage      string     `gorm:"column:error_message;size:1000"`
+	ErrorCode         string     `gorm:"column:error_code;size:50"`
+	StartTime         time.Time  `gorm:"column:start_time;type:datetime(3)"`
+	EndTime           *time.Time `gorm:"column:end_time;type:datetime(3)"`
+	DurationMs        int64      `gorm:"column:duration_ms"`
+	TotalInputTokens  int        `gorm:"column:total_input_tokens;default:0"`
+	TotalOutputTokens int        `gorm:"column:total_output_tokens;default:0"`
+	EstimatedCostCNY  float64    `gorm:"column:estimated_cost_cny;type:decimal(10,6)"`
+	Tags              string     `gorm:"column:tags;type:text"`
+	CreatedAt         time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt         time.Time  `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (TraceRun) TableName() string { return "agent_trace_runs" }

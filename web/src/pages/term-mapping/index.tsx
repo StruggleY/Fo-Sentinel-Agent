@@ -7,7 +7,6 @@ import {
   Pencil,
   X,
   Loader2,
-  BookMarked,
   BookOpen,
   CheckCircle2,
   Star,

@@ -1,9 +1,12 @@
 package cache
 
 import (
+	"context"
+	"fmt"
+	"time"
+
 	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 	redisdao "Fo-Sentinel-Agent/internal/dao/redis"
-	"context"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"
@@ -53,4 +56,31 @@ func SaveSummary(ctx context.Context, sessionID string, summary string) error {
 		return nil
 	}
 	return redisdao.SaveSession(ctx, sessionID, nil, summary)
+}
+
+// SaveSessionWithRetry 带重试的会话保存（最多重试 3 次，指数退避）
+func SaveSessionWithRetry(ctx context.Context, sessionID string, recent []*schema.Message, summary string) error {
+	maxRetries := 3
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		err := SaveSession(ctx, sessionID, recent, summary)
+		if err == nil {
+			if i > 0 {
+				g.Log().Infof(ctx, "[Session] 重试保存成功 | session=%s | retry=%d", sessionID, i)
+			}
+			return nil
+		}
+
+		lastErr = err
+		if i < maxRetries-1 {
+			backoff := time.Duration(1<<uint(i)) * time.Second // 1s, 2s, 4s
+			g.Log().Warningf(ctx, "[Session] 保存失败，%v 后重试 | session=%s | retry=%d/%d | err=%v",
+				backoff, sessionID, i+1, maxRetries, err)
+			time.Sleep(backoff)
+		}
+	}
+
+	g.Log().Errorf(ctx, "[Session] 保存失败，已达最大重试次数 | session=%s | err=%v", sessionID, lastErr)
+	return fmt.Errorf("save session after %d retries: %w", maxRetries, lastErr)
 }
