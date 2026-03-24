@@ -5,8 +5,8 @@ import { cn } from '@/utils'
 import { knowledgeService } from '@/services/knowledge'
 import toast from 'react-hot-toast'
 
-const ACCEPT = '.pdf,.md,.docx,.go,.py,.java,.js,.ts,.jsx,.tsx'
-const ALLOWED_EXTS = ['pdf', 'md', 'docx', 'go', 'py', 'java', 'js', 'ts', 'jsx', 'tsx']
+const ACCEPT = '.pdf,.md,.docx,.go,.py,.java'
+const ALLOWED_EXTS = ['pdf', 'md', 'docx', 'go', 'py', 'java']
 const MAX_FILE_SIZE = 50 * 1024 * 1024  // 50 MB
 const MAX_FILES = 3  // 最多上传3个文件
 
@@ -158,7 +158,7 @@ export default function DocUploadModal({ baseID, baseName, onClose, onSuccess }:
                 <p className="text-sm text-gray-500">
                   拖拽文件到此处，或 <span className="text-indigo-600 font-medium">点击选择</span>
                 </p>
-                <p className="text-xs text-gray-400">支持 PDF、Docx、Markdown，单文件最大 50MB，最多 3 个</p>
+                <p className="text-xs text-gray-400">支持 PDF、Docx、Markdown、Go、Python、Java，单文件最大 50MB，最多 3 个</p>
               </div>
             </div>
 

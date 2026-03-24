@@ -9,7 +9,7 @@ import (
 )
 
 // ParseFileToPlainText 根据文件扩展名选择解析器，返回清理后的纯文本。
-// 支持：.pdf、.docx、.md、.markdown、代码文件（.go/.py/.java/.js/.ts/.jsx/.tsx）
+// 支持：.pdf、.docx、.md、.markdown、代码文件（.go/.py/.java）
 //
 // 注意：.md 文件返回保留 # 标记的原始 Markdown 文本，供 StrategyHierarchical 的 extractMarkdownSections 使用。
 func ParseFileToPlainText(filePath string) (string, error) {
@@ -21,7 +21,7 @@ func ParseFileToPlainText(filePath string) (string, error) {
 		return ParseDocx(filePath)
 	case ".md", ".markdown":
 		return ParseMarkdown(filePath)
-	case ".go", ".py", ".java", ".js", ".ts", ".jsx", ".tsx":
+	case ".go", ".py", ".java":
 		return ParseCode(filePath)
 	default:
 		return "", fmt.Errorf("unsupported file format: %s", ext)

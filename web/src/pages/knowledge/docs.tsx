@@ -44,8 +44,6 @@ const FILE_TYPE_OPTIONS = [
   { value: 'go',   label: 'Go' },
   { value: 'py',   label: 'Python' },
   { value: 'java', label: 'Java' },
-  { value: 'js',   label: 'JavaScript' },
-  { value: 'ts',   label: 'TypeScript' },
 ]
 
 function formatDuration(ms?: number) {

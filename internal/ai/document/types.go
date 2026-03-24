@@ -53,11 +53,11 @@ func DefaultHierarchicalConfig() ChunkConfig {
 }
 
 // StrategyForExt 根据文件扩展名返回推荐的分块策略。
-// 代码文件（.go/.py/.java/.js/.ts）返回 StrategyCode（语法感知分块）；
+// 代码文件（.go/.py/.java）返回 StrategyCode（语法感知分块）；
 // 文档文件（.pdf/.md/.docx）返回 StrategyHierarchical（结构化父子分块）。
 func StrategyForExt(ext string) ChunkStrategy {
 	switch ext {
-	case ".go", ".py", ".java", ".js", ".ts", ".jsx", ".tsx":
+	case ".go", ".py", ".java":
 		return StrategyCode
 	default:
 		return StrategyHierarchical
@@ -79,10 +79,6 @@ func ConfigForExt(ext string) ChunkConfig {
 			cfg.Language = "python"
 		case ".java":
 			cfg.Language = "java"
-		case ".js", ".jsx":
-			cfg.Language = "javascript"
-		case ".ts", ".tsx":
-			cfg.Language = "typescript"
 		}
 	}
 

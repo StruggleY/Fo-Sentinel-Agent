@@ -29,7 +29,7 @@ const STRATEGIES = [
   {
     value: 'code',
     label: '代码切分',
-    desc: '按函数 / 类定义边界切分，适合 Go、Python、Java、JS、TS 代码文件',
+    desc: '按函数 / 类定义边界切分，适合 Go、Python、Java 代码文件',
   },
 ]
 
