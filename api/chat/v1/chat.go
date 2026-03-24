@@ -6,12 +6,9 @@ import (
 
 type FileUploadReq struct {
 	g.Meta      `path:"/upload" method:"post" mime:"multipart/form-data" summary:"文件上传"`
-	Strategy    string `json:"strategy"     form:"strategy"`     // 分块策略：fixed_size | structure_aware
-	ChunkSize   int    `json:"chunk_size"   form:"chunk_size"`   // fixed_size：目标块大小（rune），默认 512
-	OverlapSize int    `json:"overlap_size" form:"overlap_size"` // fixed_size：重叠大小（rune），默认 128
-	TargetChars int    `json:"target_chars" form:"target_chars"` // structure_aware：目标块大小，默认 1400
-	MaxChars    int    `json:"max_chars"    form:"max_chars"`    // structure_aware：最大块大小，默认 1800
-	MinChars    int    `json:"min_chars"    form:"min_chars"`    // structure_aware：最小块大小，默认 600
+	Strategy    string `json:"strategy"     form:"strategy"`     // 分块策略：sliding_window | hierarchical
+	ChunkSize   int    `json:"chunk_size"   form:"chunk_size"`   // sliding_window：目标块大小（rune），默认 512
+	OverlapSize int    `json:"overlap_size" form:"overlap_size"` // sliding_window：重叠大小（rune），默认 128
 }
 
 type FileUploadRes struct {

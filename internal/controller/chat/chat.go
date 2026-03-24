@@ -96,15 +96,6 @@ func (c *ControllerV1) FileUpload(ctx context.Context, req *v1.FileUploadReq) (*
 	if req.OverlapSize > 0 {
 		cfg.OverlapSize = req.OverlapSize
 	}
-	if req.TargetChars > 0 {
-		cfg.TargetChars = req.TargetChars
-	}
-	if req.MaxChars > 0 {
-		cfg.MaxChars = req.MaxChars
-	}
-	if req.MinChars > 0 {
-		cfg.MinChars = req.MinChars
-	}
 
 	// 构建向量索引（Milvus 去重 + 嵌入写入）
 	if err = chatsvc.BuildFileIndex(ctx, fileDirPath+"/"+uploadFile.Filename, cfg); err != nil {

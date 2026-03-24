@@ -9,9 +9,10 @@ require (
 	github.com/cloudwego/eino-ext/components/embedding/dashscope v0.0.0-20260109062358-b9080dbc7bed
 	github.com/cloudwego/eino-ext/components/indexer/milvus v0.0.0-20251011073417-75b93b87b8a9
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.1
+	github.com/dslipak/pdf v0.0.2
+	github.com/fumiama/go-docx v0.0.0-20250506085032-0c30fd09304b
 	github.com/gogf/gf/v2 v2.7.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/ledongthuc/pdf v0.0.0-20240201131950-da5b75280b06
 	github.com/milvus-io/milvus-sdk-go/v2 v2.4.2
 	github.com/mmcdole/gofeed v1.3.0
 	github.com/pdfcpu/pdfcpu v0.11.1
@@ -28,7 +29,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
-	github.com/dslipak/pdf v0.0.2 // indirect
+	github.com/fumiama/imgsz v0.0.2 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/hhrutter/lzw v1.0.0 // indirect
 	github.com/hhrutter/pkcs7 v0.2.0 // indirect

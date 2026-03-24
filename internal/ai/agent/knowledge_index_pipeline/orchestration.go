@@ -3,10 +3,13 @@ package knowledge_index_pipeline
 import (
 	"context"
 	"fmt"
-	"sync"
+	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	aidoc "Fo-Sentinel-Agent/internal/ai/document"
+	"Fo-Sentinel-Agent/internal/ai/document/chunkers"
+	"Fo-Sentinel-Agent/internal/ai/document/parsers"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"
@@ -26,43 +29,71 @@ type IndexInput struct {
 // BuildAndIndex 执行知识索引并返回 ChunkResult 列表（供知识库服务写 MySQL）。
 // 该函数在 Worker Pool 中被调用，不走 Eino Graph（直接调用解析+索引），
 // 以便拿到完整的 ChunkResult（含 section_title、parent_content）。
+//
+// 策略自动推断：Config.Strategy 为空时按扩展名填充（所有格式均为 hierarchical），其余参数保留。
 func BuildAndIndex(ctx context.Context, input IndexInput) ([]aidoc.ChunkResult, error) {
 	cfg := input.Config
 	if cfg.Strategy == "" {
-		cfg = aidoc.DefaultChunkConfig()
+		// 仅补全策略，保留调用方已设置的 ChunkSize / ParentChunkSize 等字段
+		cfg.Strategy = aidoc.StrategyForExt(filepath.Ext(input.FilePath))
 	}
 
 	var chunks []aidoc.ChunkResult
 	var docs []*schema.Document
 
 	if cfg.Strategy == aidoc.StrategyHierarchical {
-		// 结构化解析 + 父子分块
+		// Hierarchical 策略：父子分块，结构化解析保留章节标题，携带章节 metadata
 		t0 := time.Now()
-		parsed, err := aidoc.ParseFileStructured(input.FilePath)
+		// 使用 DocTitle（原始文件名）作为默认标题，避免 UUID 文件名污染
+		defaultTitle := input.DocTitle
+		if defaultTitle == "" {
+			defaultTitle = filepath.Base(input.FilePath)
+		}
+		parsed, err := parsers.ParseFileWithStructure(input.FilePath, defaultTitle)
 		if err != nil {
 			return nil, err
 		}
-		g.Log().Infof(ctx, "[index] ParseFileStructured: %v", time.Since(t0))
+		g.Log().Infof(ctx, "[index] ParseFileWithStructure: %v", time.Since(t0))
 		t1 := time.Now()
-		chunks = aidoc.HierarchicalChunkFromDocument(parsed, cfg)
-		g.Log().Infof(ctx, "[index] HierarchicalChunk: %v, chunks=%d", time.Since(t1), len(chunks))
-	} else {
-		// 普通解析 + 分块
+
+		chunks = aidoc.ChunkDocument(parsed, cfg)
+		g.Log().Infof(ctx, "[index] ChunkDocument: %v, chunks=%d", time.Since(t1), len(chunks))
+	} else if cfg.Strategy == aidoc.StrategyCode {
+		// Code 策略：语法感知分块，按函数/类边界切分，保留函数名作为 SectionTitle
 		t0 := time.Now()
-		text, err := aidoc.ParseFile(input.FilePath)
+		text, err := parsers.ParseFileToPlainText(input.FilePath)
 		if err != nil {
 			return nil, err
 		}
-		g.Log().Infof(ctx, "[index] ParseFile: %v", time.Since(t0))
-		rawChunks := aidoc.Chunk(text, cfg)
+		g.Log().Infof(ctx, "[index] ParseFileToPlainText: %v", time.Since(t0))
+		t1 := time.Now()
+
+		chunks = chunkers.Code(text, cfg.Language, cfg.ChunkSize)
+		for i := range chunks {
+			chunks[i].ChunkIndex = i
+			chunks[i].CharCount = utf8.RuneCountInString(chunks[i].Content)
+		}
+		g.Log().Infof(ctx, "[index] Code chunking: %v, chunks=%d", time.Since(t1), len(chunks))
+	} else {
+		// SlidingWindow 策略：滑动窗口分块，无章节标题
+		t0 := time.Now()
+		text, err := parsers.ParseFileToPlainText(input.FilePath)
+		if err != nil {
+			return nil, err
+		}
+		g.Log().Infof(ctx, "[index] ParseFileToPlainText: %v", time.Since(t0))
+		t1 := time.Now()
+
+		rawChunks := aidoc.ChunkText(text, cfg)
 		chunks = make([]aidoc.ChunkResult, len(rawChunks))
 		for i, c := range rawChunks {
 			chunks[i] = aidoc.ChunkResult{
 				Content:    c,
 				ChunkIndex: i,
-				CharCount:  len([]rune(c)),
+				CharCount:  utf8.RuneCountInString(c),
 			}
 		}
+		g.Log().Infof(ctx, "[index] ChunkText: %v, chunks=%d", time.Since(t1), len(chunks))
 	}
 
 	// 构建 Milvus 文档（携带完整 metadata）
@@ -91,54 +122,33 @@ func BuildAndIndex(ctx context.Context, input IndexInput) ([]aidoc.ChunkResult, 
 		return chunks, nil
 	}
 
-	// 获取 documents 分区索引器并并发分批写入（DashScope Embedding API 每批上限 10 条，最大并发 5）
+	// 获取 documents 分区索引器并串行分批写入（DashScope Embedding API 每批上限 10 条）
 	idx, err := newIndexer(ctx)
 	if err != nil {
 		return nil, err
 	}
 	const embedBatchSize = 10
-	const maxConcurrent = 5
 
-	// 切分批次
-	type batch struct {
-		start int
-		end   int
-	}
-	var batches []batch
+	// 串行执行批次写入，避免触发 Milvus 速率限制（rate=0.1，即每10秒1次）
+	tEmbed := time.Now()
+	batchCount := 0
 	for i := 0; i < len(docs); i += embedBatchSize {
 		end := i + embedBatchSize
 		if end > len(docs) {
 			end = len(docs)
 		}
-		batches = append(batches, batch{i, end})
+		if _, err := idx.Store(ctx, docs[i:end]); err != nil {
+			return nil, fmt.Errorf("store batch [%d,%d): %w", i, end, err)
+		}
+		batchCount++
+		// 每批次间隔 200ms，确保不超过 Milvus 速率限制
+		if i+embedBatchSize < len(docs) {
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
-
-	// 并发执行，semaphore 限流
-	tEmbed := time.Now()
-	sem := make(chan struct{}, maxConcurrent)
-	var mu sync.Mutex
-	var firstErr error
-	var wg sync.WaitGroup
-	for _, b := range batches {
-		b := b
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if _, e := idx.Store(ctx, docs[b.start:b.end]); e != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = fmt.Errorf("store batch [%d,%d): %w", b.start, b.end, e)
-				}
-				mu.Unlock()
-			}
-		}()
-	}
-	wg.Wait()
-	g.Log().Infof(ctx, "[index] Embedding+Store: %v, batches=%d", time.Since(tEmbed), len(batches))
-	if firstErr != nil {
-		return nil, firstErr
+	g.Log().Infof(ctx, "[index] Embedding+Store: %v, batches=%d", time.Since(tEmbed), batchCount)
+	if err != nil {
+		return nil, err
 	}
 	return chunks, nil
 }

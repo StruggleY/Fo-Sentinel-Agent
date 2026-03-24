@@ -57,7 +57,7 @@ type BaseDeleteRes struct{}
 type DocUploadReq struct {
 	g.Meta        `path:"/knowledge/v1/docs/upload" method:"POST" tags:"Knowledge" summary:"上传知识文档"`
 	BaseID        string            `json:"base_id" v:"required#知识库ID不能为空"` // 目标知识库 ID
-	ChunkStrategy string            `json:"chunk_strategy"`                 // fixed_size / structure_aware / hierarchical
+	ChunkStrategy string            `json:"chunk_strategy"`                 // sliding_window / hierarchical / code
 	ChunkSize     int               `json:"chunk_size"`                     // 自定义子块大小（rune 数），0 使用默认值
 	File          *ghttp.UploadFile `json:"file" type:"file" v:"required#文件不能为空"`
 }
@@ -94,7 +94,7 @@ type DocItem struct {
 	FileType      string `json:"file_type"`
 	ChunkCount    int    `json:"chunk_count"`
 	IndexedChunks int    `json:"indexed_chunks"`              // 已写入 MySQL 的分块数（进度追踪）
-	ChunkStrategy string `json:"chunk_strategy"`              // 分块策略：fixed_size / structure_aware / hierarchical
+	ChunkStrategy string `json:"chunk_strategy"`              // 分块策略：fixed_size / hierarchical
 	IndexStatus   string `json:"index_status"`                // pending / indexing / completed / failed
 	IndexError    string `json:"index_error,omitempty"`       // 失败时的错误信息
 	IndexedAt     string `json:"indexed_at,omitempty"`        // 最近一次索引完成时间
@@ -116,7 +116,7 @@ type DocDeleteRes struct{}
 type DocRebuildReq struct {
 	g.Meta        `path:"/knowledge/v1/docs/rebuild" method:"POST" tags:"Knowledge" summary:"重新索引文档"`
 	ID            string `json:"id" v:"required#文档ID不能为空"`
-	ChunkStrategy string `json:"chunk_strategy"` // 可选：切换分块策略（空=保持原策略）fixed_size/structure_aware/hierarchical
+	ChunkStrategy string `json:"chunk_strategy"` // 可选：切换分块策略（空=保持原策略）fixed_size/hierarchical
 }
 
 // DocRebuildRes 重新索引文档响应

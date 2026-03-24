@@ -390,9 +390,19 @@ func RebuildDoc(ctx context.Context, docID string, newStrategy ...string) error 
 	if len(newStrategy) > 0 && newStrategy[0] != "" {
 		strategy := aidoc.ChunkStrategy(newStrategy[0])
 		var newCfg aidoc.ChunkConfig
-		if strategy == aidoc.StrategyHierarchical {
+		switch strategy {
+		case aidoc.StrategyHierarchical:
 			newCfg = aidoc.DefaultHierarchicalConfig()
-		} else {
+		case aidoc.StrategySlidingWindow:
+			newCfg = aidoc.ChunkConfig{Strategy: strategy, ChunkSize: 512, OverlapSize: 128}
+		case aidoc.StrategyCode:
+			// 保留原有语言配置（如有），切换策略时不丢失 language 字段
+			var existingCfg aidoc.ChunkConfig
+			if doc.ChunkConfig != "" {
+				sonic.UnmarshalString(doc.ChunkConfig, &existingCfg)
+			}
+			newCfg = aidoc.ChunkConfig{Strategy: strategy, Language: existingCfg.Language}
+		default:
 			newCfg = aidoc.ChunkConfig{Strategy: strategy}
 		}
 		cfgJSON, _ := sonic.Marshal(newCfg)

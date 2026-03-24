@@ -23,9 +23,9 @@ const STATUS_CONFIG = {
 }
 
 const STRATEGY_LABEL: Record<string, string> = {
-  fixed_size:       '固定分块',
-  structure_aware:  '结构感知',
+  sliding_window:       '滑动窗口',
   hierarchical:     '层级分块',
+  code:             '代码切分',
 }
 
 const STATUS_OPTIONS = [
@@ -40,9 +40,12 @@ const FILE_TYPE_OPTIONS = [
   { value: '', label: '全部类型' },
   { value: 'pdf',  label: 'PDF' },
   { value: 'md',   label: 'Markdown' },
-  { value: 'docx', label: 'Word' },
-  { value: 'pptx', label: 'PPT' },
-  { value: 'txt',  label: 'TXT' },
+  { value: 'docx', label: 'DOCX' },
+  { value: 'go',   label: 'Go' },
+  { value: 'py',   label: 'Python' },
+  { value: 'java', label: 'Java' },
+  { value: 'js',   label: 'JavaScript' },
+  { value: 'ts',   label: 'TypeScript' },
 ]
 
 function formatDuration(ms?: number) {

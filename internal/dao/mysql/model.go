@@ -184,7 +184,7 @@ type KnowledgeDocument struct {
 	FileSize        int64          `gorm:"column:file_size;not null"`                         // 字节数，来自 os.Stat 或上传 multipart size
 	FileType        string         `gorm:"column:file_type;size:32;not null;index"`           // 扩展名（小写，不含点），如 pdf / md / docx
 	FileHash        string         `gorm:"column:file_hash;size:64;index"`                    // 文件 SHA256 hex（去重用），空值表示未计算
-	ChunkStrategy   string         `gorm:"column:chunk_strategy;size:32;not null"`            // 分块策略：fixed_size / structure_aware / hierarchical
+	ChunkStrategy   string         `gorm:"column:chunk_strategy;size:32;not null"`            // 分块策略：sliding_window / hierarchical / code
 	ChunkConfig     string         `gorm:"column:chunk_config;type:json"`                     // ChunkConfig JSON 序列化（供重建索引时复用）
 	ChunkCount      int            `gorm:"column:chunk_count;default:0"`                      // 索引完成后的实际子块数（indexing 阶段提前写入用于进度计算）
 	IndexedChunks   int            `gorm:"column:indexed_chunks;default:0"`                   // 已写入 MySQL knowledge_chunks 的分块数（进度追踪，随批次递增）

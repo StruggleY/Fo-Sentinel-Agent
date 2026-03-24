@@ -138,8 +138,8 @@ export const knowledgeService = {
     await api.post('/knowledge/v1/docs/delete', { id })
   },
 
-  async rebuildDoc(id: string, chunkStrategy?: string): Promise<void> {
-    await api.post('/knowledge/v1/docs/rebuild', { id, chunk_strategy: chunkStrategy ?? '' })
+  async rebuildDoc(id: string, chunkStrategy: string): Promise<void> {
+    await api.post('/knowledge/v1/docs/rebuild', { id, chunk_strategy: chunkStrategy })
   },
 
   async batchDeleteDocs(ids: string[]): Promise<{ deleted: number; failed: number }> {
@@ -147,8 +147,8 @@ export const knowledgeService = {
     return res.data.data ?? { deleted: 0, failed: 0 }
   },
 
-  async batchRebuildDocs(ids: string[], chunkStrategy?: string): Promise<{ submitted: number; failed: number }> {
-    const res = await api.post<ApiWrap<{ submitted: number; failed: number }>>('/knowledge/v1/docs/batch_rebuild', { ids, chunk_strategy: chunkStrategy ?? '' })
+  async batchRebuildDocs(ids: string[], chunkStrategy: string): Promise<{ submitted: number; failed: number }> {
+    const res = await api.post<ApiWrap<{ submitted: number; failed: number }>>('/knowledge/v1/docs/batch_rebuild', { ids, chunk_strategy: chunkStrategy })
     return res.data.data ?? { submitted: 0, failed: 0 }
   },
 

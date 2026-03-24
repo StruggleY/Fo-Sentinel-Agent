@@ -5,9 +5,10 @@ import { cn } from '@/utils'
 import { knowledgeService } from '@/services/knowledge'
 import toast from 'react-hot-toast'
 
-const ACCEPT = '.pdf,.md,.docx'
-const ALLOWED_EXTS = ['pdf', 'md', 'docx']
+const ACCEPT = '.pdf,.md,.docx,.go,.py,.java,.js,.ts,.jsx,.tsx'
+const ALLOWED_EXTS = ['pdf', 'md', 'docx', 'go', 'py', 'java', 'js', 'ts', 'jsx', 'tsx']
 const MAX_FILE_SIZE = 50 * 1024 * 1024  // 50 MB
+const MAX_FILES = 3  // 最多上传3个文件
 
 type UploadStatus = 'pending' | 'uploading' | 'success' | 'error'
 
@@ -37,8 +38,16 @@ export default function DocUploadModal({ baseID, baseName, onClose, onSuccess }:
   const inputRef = useRef<HTMLInputElement>(null)
 
   const addFiles = (incoming: File[]) => {
+    if (files.length >= MAX_FILES) {
+      toast.error(`最多只能上传 ${MAX_FILES} 个文件`)
+      return
+    }
     const newEntries: FileEntry[] = []
     for (const f of incoming) {
+      if (files.length + newEntries.length >= MAX_FILES) {
+        toast.error(`最多只能上传 ${MAX_FILES} 个文件`)
+        break
+      }
       const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
       if (!ALLOWED_EXTS.includes(ext)) {
         toast.error(`${f.name}：不支持的格式`)
@@ -149,8 +158,7 @@ export default function DocUploadModal({ baseID, baseName, onClose, onSuccess }:
                 <p className="text-sm text-gray-500">
                   拖拽文件到此处，或 <span className="text-indigo-600 font-medium">点击选择</span>
                 </p>
-                <p className="text-xs text-gray-400">支持 PDF、TXT、MD、DOCX、PPTX，单文件最大 50MB，可多选</p>
-                <p className="text-xs text-gray-400">系统将根据文件类型自动选择最优分块策略</p>
+                <p className="text-xs text-gray-400">支持 PDF、Docx、Markdown，单文件最大 50MB，最多 3 个</p>
               </div>
             </div>
 

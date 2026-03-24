@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"path/filepath"
-	"strings"
 
 	v1 "Fo-Sentinel-Agent/api/knowledge/v1"
 	aidoc "Fo-Sentinel-Agent/internal/ai/document"
@@ -81,34 +80,16 @@ func (c *controllerV1) DocUpload(ctx context.Context, req *v1.DocUploadReq) (res
 		return nil, err
 	}
 
-	// 构建分块配置
-	strategy := req.ChunkStrategy
-	if strategy == "" {
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(req.File.Filename), "."))
-		switch ext {
-		case "md", "markdown":
-			strategy = "structure_aware"
-		default:
-			strategy = "hierarchical"
-		}
-	}
-	chunkCfg := aidoc.ChunkConfig{
-		Strategy: aidoc.ChunkStrategy(strategy),
+	// 构建分块配置：未传 strategy 时按文件扩展名自动选择
+	var chunkCfg aidoc.ChunkConfig
+	if req.ChunkStrategy != "" {
+		chunkCfg = aidoc.DefaultChunkConfig()
+		chunkCfg.Strategy = aidoc.ChunkStrategy(req.ChunkStrategy)
+	} else {
+		chunkCfg = aidoc.ConfigForExt(filepath.Ext(req.File.Filename))
 	}
 	if req.ChunkSize > 0 {
 		chunkCfg.ChildChunkSize = req.ChunkSize
-	}
-	if chunkCfg.Strategy == aidoc.StrategyHierarchical {
-		defaultCfg := aidoc.DefaultHierarchicalConfig()
-		if chunkCfg.ParentChunkSize == 0 {
-			chunkCfg.ParentChunkSize = defaultCfg.ParentChunkSize
-		}
-		if chunkCfg.ChildChunkSize == 0 {
-			chunkCfg.ChildChunkSize = defaultCfg.ChildChunkSize
-		}
-		if chunkCfg.ChildOverlap == 0 {
-			chunkCfg.ChildOverlap = defaultCfg.ChildOverlap
-		}
 	}
 
 	doc, err := knowledgesvc.UploadDoc(ctx, req.BaseID, req.File.Filename, fileContent, chunkCfg)
