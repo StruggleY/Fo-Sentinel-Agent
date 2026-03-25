@@ -28,8 +28,6 @@
     - [11. SSE 流式输出](#11-sse-流式输出)
 - [技术栈](#技术栈)
 - [快速开始](#快速开始)
-- [配置参考](#配置参考)
-- [开发指南](#开发指南)
 - [部署](#部署)
 - [许可证](#许可证)
 
@@ -367,75 +365,6 @@ Rerank 精排 (qwen3-rerank)
 - **混合检索策略**：稠密向量捕捉语义相似性，稀疏向量精确词匹配，RRF 算法自动融合排序无需手动调权
 - **语义缓存加速**：Redis 缓存检索结果，相似查询直接命中跳过向量检索，显著降低延迟
 - **Rerank 精排提升**：精排模型重新打分，提升 Top 结果质量，过滤低分文档控制上下文质量
-- **BM25 编码**：通过 `embedder.BM25Embed(query)` 将文本转为稀疏向量
-
-**B. 纯稠密检索模式（DenseSearcher）**
-
-- 仅使用稠密向量 + COSINE 相似度
-- 适用场景：语义理解、模糊匹配、跨语言检索
-- 通过 `retriever.hybrid.enabled: false` 关闭混合检索
-
-**阶段 4：结果过滤与截断**
-
-- **MinScore 过滤**：丢弃相似度 < 0.30 的文档（避免无关内容污染 LLM）
-- **FinalTopK 截断**：保留 Top-3 文档送入 LLM（平衡上下文质量与 Token 消耗）
-- 配置项：`redis.semantic_cache.topk: 5`（Milvus 候选池），`redis.semantic_cache.final_topk: 3`（最终返回数）
-
-**阶段 5：缓存写入**
-
-- 将过滤截断后的结果写入 Redis，供后续相似查询复用
-
-#### 多路并行检索（MultiRetrieve）
-
-**子问题拆分场景**：复杂查询"分析最近一周的 Log4j 相关事件并评估风险"拆分为多个子查询后，需要并行检索提升效率。
-
-**并发设计**：
-- 每个子查询启动独立 goroutine，通过带缓冲 channel 收集结果
-- 总延迟 ≈ max(各子查询延迟) + 50ms 协调开销
-- 单个子查询失败只记录 Warning，不影响其他子查询
-
-**去重逻辑**：
-- 按文档 ID 去重，保持首次出现顺序
-- 避免同一文档在 LLM Prompt 中重复出现（占用 Token 且使 LLM 过度关注）
-
-#### 禁用文档过滤（FilterDisabledDocs）
-
-- 知识库文档可被用户禁用（`enabled=false`），但 Milvus 中的分块仍存在
-- 从检索结果的 `metadata.doc_id` 提取文档 ID，批量查询 MySQL 禁用状态
-- MySQL 不可用时降级返回原始结果，不影响检索主流程
-
-#### 配置参数
-
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `redis.semantic_cache.ttl` | 24 | 缓存有效期（小时） |
-| `redis.semantic_cache.threshold` | 0.85 | 余弦相似度命中阈值 |
-| `redis.semantic_cache.topk` | 5 | Milvus 初始召回数（候选池） |
-| `redis.semantic_cache.final_topk` | 3 | 返回给 LLM 的最终文档数 |
-| `redis.semantic_cache.min_score` | 0.30 | 最低相似度阈值 |
-| `retriever.hybrid.enabled` | true | 是否启用混合检索 |
-| `retriever.hybrid.rrf_k` | 60 | RRF 融合参数 k |
-
-#### 查询重写与子问题拆分（上游模块）
-
-**查询重写（`internal/ai/rewrite/`）**
-
-- 多轮对话中消除代词歧义、补全上下文
-- Event / Report / Risk pipeline 默认启用
-- Solve pipeline 不启用（单事件明确查询，节省 ~200ms）
-
-**子问题拆分（`internal/ai/split/`）**
-
-- 复杂查询拆分为多个子查询，通过 `MultiRetrieve` 并行检索
-- 增加 ~300ms 延迟但显著提升召回完整性
-
-#### 父子分块（文档处理层）
-
-检索时用小块（子块 256 rune）保证语义精准，生成时附上父块（1024 rune）提供足够上下文。分块策略支持三种：
-
-- `sliding_window`：滑动窗口分块（512 字符 + 128 重叠），通用场景，计算开销最低
-- `hierarchical`：层级分块（父块 1024 + 子块 256），文档文件默认策略，检索子块但送入 LLM 时附上父块和章节标题
-- `code`：代码语法感知分块，按函数/类边界切分，保留函数名作为章节标题，适合 Go/Python/Java/JS/TS 代码文件
 
 ---
 
@@ -446,13 +375,13 @@ Rerank 精排 (qwen3-rerank)
 #### 主要流程
 
 ```
-Web 上传 → 文件保存 → Worker Pool → 文档解析 → 分块策略 → 向量化 → Milvus 索引
+Web 上传 → 文件保存 → Worker Pool → 文档解析 → 智能分块策略 → 向量化 → Milvus 索引
 ```
 
 **核心特性**
 
 - **多知识库隔离**：支持创建多个知识库，通过元数据字段逻辑隔离
-- **智能分块策略**：基于文件类型自动选择，Markdown 保留结构，代码按语法边界切分
+- **智能分块策略**：基于文件类型自动选择，父子结构感知分块，滑动窗口分块，代码语法感知分块
 - **多格式解析器**：支持 PDF/DOCX/Markdown/代码文件，三阶段 fallback 处理异常文档
 - **全生命周期管理**：状态追踪，支持重建索引
 
@@ -516,46 +445,26 @@ Controller → StartRun
 
 追踪系统告诉你每次请求发生了什么，RAG 质量评估模块告诉你系统整体表现如何。
 
-**KPI 仪表盘**
+#### 主要流程
 
-从 `agent_trace_runs/nodes` 聚合关键指标：
+```
+agent_trace_runs/nodes 聚合
+        ↓
+    KPI 指标计算 (成功率/延迟/召回数/相似度/缓存命中率)
+        ↓
+    模型成本分布统计
+        ↓
+    用户反馈收集 (点赞/点踩)
+        ↓
+    ECharts 可视化 (趋势图/分布图)
+```
 
-| 指标 | 说明 | 阈值判断 |
-|------|------|----------|
-| 成功率 | status='success' 的请求占比 | >= 0.99 为 good，>= 0.95 为 warning |
-| 平均延迟 | 平均响应耗时（毫秒） | 反映用户体验 |
-| P95 延迟 | 95 分位延迟（毫秒） | <= 5s 为 good，<= 15s 为 warning |
-| 平均召回文档数 | RETRIEVER 节点平均召回文档数 | 反映检索覆盖度 |
-| 平均最高相似度分 | RETRIEVER 节点平均最高相似度分 | 反映检索精准度 |
-| 缓存命中率 | CACHE 节点命中次数 / 总次数 | 反映缓存效率 |
-| 平均 Rerank 分数 | Rerank 节点平均相关性分数 | 反映精排质量 |
+**核心特性**
 
-支持 3 种时间窗口：24h（按小时分组）、7d（按天分组）、30d（按天分组）
-
-**模型成本分布**
-
-按模型名称聚合成本占比，支持：
-- **LLM 模型**：DeepSeek V3（主推理）、DeepSeek V3 Quick（路由/快速）
-- **Embedding 模型**：text-embedding-v4（查询 + 索引）
-- **Rerank 模型**：qwen3-rerank（精排）
-
-每个模型显示：输入/输出 Token、总成本（CNY）、成本占比、请求次数
-
-**用户反馈**
-
-聊天界面每条 AI 回复底部支持点赞/点踩，反馈写入 `message_feedbacks` 表，可统计满意度趋势。反馈按 `(session_id, message_index)` 唯一标识一条回复，重复提交时更新而非插入新记录。
-
-**链路关联**
-
-质量评估页面可按 session_id 筛选具体链路，点击查看 Trace 详情，定位低质量回答的根因。链路列表支持按状态过滤（success/error/running），显示用户反馈状态（点赞/踩图标）。
-
-**趋势图**
-
-基于 ECharts 的响应耗时和检索得分趋势图，帮助识别性能退化和质量波动。
-
-**趋势图**
-
-基于 ECharts 的响应耗时和检索得分趋势图，帮助识别性能退化。
+- **KPI 仪表盘**：聚合成功率、延迟、召回文档数、相似度分数、缓存命中率等关键指标
+- **模型成本分布**：按模型名称统计 Token 消耗和成本占比，支持多模型成本分析
+- **用户反馈系统**：聊天界面支持点赞/点踩，统计满意度趋势
+- **链路关联**：按 session_id 筛选具体链路，点击查看 Trace 详情定位根因
 
 ---
 
@@ -598,10 +507,12 @@ LLM 生成 → 结构化报告内容
 create_report → 持久化到 MySQL reports 表
 ```
 
-- **多类型报告**：周报（weekly）/ 月报（monthly）/ 自定义（custom）三种模板，对应不同的时间范围和分析维度
-- **Report Agent 工具链**：`query_events`（获取事件数据）→ `query_report_templates`（获取模板）→ ReAct 推理生成内容 → `create_report`（持久化到 MySQL）
-- **历史报告检索**：`query_reports` 工具支持按时间范围、类型过滤查询历史报告，Report Agent 可参考历史报告的写法和结构
-- **RAG 增强**：报告生成时同样通过 Milvus 检索相关历史事件和内部文档，保证报告内容有据可查
+**核心特性**
+
+- **多类型报告**：支持周报、月报、自定义报告，对应不同的时间范围和分析维度
+- **工具链协同**：通过工具获取事件数据和模板，ReAct 推理生成内容，自动持久化
+- **历史报告检索**：支持按时间范围、类型过滤查询历史报告，参考历史写法和结构
+- **RAG 增强**：通过 Milvus 检索相关历史事件和内部文档，保证报告内容有据可查
 
 ---
 
@@ -609,31 +520,26 @@ create_report → 持久化到 MySQL reports 表
 
 AI 分析可能需要数十秒才能完成，如果等分析完再一次性返回，用户体验极差。系统所有 AI 分析过程都通过 Server-Sent Events 实时推流，用户可以看到推理步骤和工具调用过程。
 
-**SSE 事件类型协议**
+#### 主要流程
 
 ```
-# 请求开始推送会话元数据
-data: {"type":"meta","content":"{\"sessionId\":\"...\",\"deepThinking\":false}"}
-
-# Agent 路由/状态通知
-data: {"type":"status","content":"[Event Agent 分析中...]"}
-
-# 标准模式内容流（按意图分类）
-data: {"type":"chat","content":"文本块"}
-data: {"type":"event","content":"分析结果块"}
-data: {"type":"report","content":"报告内容块"}
-data: {"type":"risk","content":"风险评估块"}
-data: {"type":"solve","content":"处置方案块"}
-data: {"type":"intel","content":"情报分析块"}
-
-# 深度思考模式（Plan Agent）
-data: {"type":"plan_step","content":"规划执行中间步骤"}
-data: {"type":"plan","content":"最终答案块"}
-
-# 异常 / 结束
-data: {"type":"error","content":"错误信息"}
-data: [DONE]
+Controller 接收请求
+        ↓
+    推送 meta 事件 (sessionId/timestamp)
+        ↓
+    推送 status 事件 (Agent 路由状态)
+        ↓
+    流式推送内容块 (chat/event/report/risk/solve/intel/plan)
+        ↓
+    推送 done 事件 (流结束)
 ```
+
+**核心特性**
+
+- **多类型事件**：支持 meta、status、内容流、plan_step、error、done 等事件类型
+- **按意图分类**：标准模式按 Agent 类型推送，深度思考模式推送 plan_step 和 plan 事件
+- **实时反馈**：用户可实时看到 Agent 推理步骤、工具调用过程和中间结果
+- **异常处理**：错误时推送 error 事件，保证前端能正确处理异常情况
 
 ---
 
@@ -676,13 +582,11 @@ git clone https://github.com/your-org/fo-sentinel-agent.git
 cd fo-sentinel-agent
 ```
 
-### 2. 启动依赖服务（Docker Compose）
+### 2. 启动依赖服务
 
 ```bash
 docker compose -f manifest/docker/docker-compose.yml up -d
 ```
-
-这将启动 MySQL（3307 端口）、Redis（6379）、Milvus（19530）。
 
 ### 3. 配置
 
@@ -692,32 +596,7 @@ docker compose -f manifest/docker/docker-compose.yml up -d
 cp manifest/config/config.yaml manifest/config/config.local.yaml
 ```
 
-**必填配置项：**
-
-```yaml
-# LLM 模型配置
-ds_think_chat_model:
-  api_key: "your-deepseek-api-key"      # DeepSeek V3 API Key（主推理/深度思考）
-ds_quick_chat_model:
-  api_key: "your-deepseek-api-key"      # DeepSeek V3 API Key（意图识别/快速）
-
-doubao_embedding_model:
-  api_key: "your-dashscope-api-key"     # DashScope API Key（嵌入 + Rerank）
-
-# 数据库
-database:
-  mysql:
-    dsn: "root:password@tcp(127.0.0.1:3307)/fo_sentinel?charset=utf8mb4&parseTime=True"
-
-# Redis
-redis:
-  addr: "127.0.0.1:6379"
-
-# 联网搜索（可选，Intelligence Agent 需要）
-tools:
-  web_search:
-    tavily_api_key: "tvly-xxxx"
-```
+配置 API Key 和数据库连接信息，详见 `manifest/config/config.yaml` 注释说明。
 
 ### 4. 启动后端
 
@@ -738,7 +617,7 @@ npm run dev
 
 ## 部署
 
-### 开发环境（Docker Compose）
+### 开发环境
 
 ```bash
 # 启动所有依赖服务
@@ -748,33 +627,25 @@ docker compose -f manifest/docker/docker-compose.yml up -d
 docker compose -f manifest/docker/docker-compose.yml ps
 ```
 
-服务端口：
-- MySQL：`3307`
-- Redis：`6379`
-- Milvus：`19530`（gRPC）、`9091`（HTTP）
-
-### 生产部署检查清单
-
-- [ ] 修改 `auth.seed.admin_password`（初始管理员密码）
-- [ ] 启用 JWT：`auth.jwt.enabled: true`
-- [ ] 设置强随机 `auth.jwt.secret`
-- [ ] 配置 HTTPS（反向代理 Nginx/Caddy）
-- [ ] 配置 Redis 持久化（RDB 或 AOF）
-- [ ] Milvus 生产集群替换单机版
-- [ ] 监控 LLM API 配额（DeepSeek、DashScope）
-- [ ] 配置 `trace.record_prompt: false`（减少 90% 追踪写入量）
-- [ ] 配置日志收集与告警
-
-### 构建生产二进制
+### 生产环境
 
 ```bash
-# 后端
+# 构建后端
 go build -o fo-sentinel-agent main.go
 
-# 前端
+# 构建前端
 cd web && npm run build
-# 构建产物在 web/dist/，由后端 static 服务托管
 ```
+
+**生产部署建议：**
+
+- 修改默认管理员密码
+- 启用 JWT 认证
+- 配置 HTTPS 反向代理
+- 配置 Redis 持久化
+- 使用 Milvus 生产集群
+- 监控 LLM API 配额
+- 配置日志收集与告警
 
 ## 许可证
 
