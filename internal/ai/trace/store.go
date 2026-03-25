@@ -159,10 +159,12 @@ type NodeUpdate struct {
 	PromptText     string
 	CompletionText string
 	// RETRIEVER 专属
-	QueryText     string
-	RetrievedDocs string
-	FinalTopK     int
-	CacheHit      bool
+	QueryText      string
+	RetrievedDocs  string
+	FinalTopK      int
+	CacheHit       bool
+	DocCount       int     // 召回文档数
+	MaxVectorScore float64 // 最高相似度分数
 	// 通用
 	Metadata string
 }

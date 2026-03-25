@@ -317,9 +317,26 @@ func buildNodeUpdate(ctx context.Context, info *callbacks.RunInfo, output callba
 		if retrieverOut == nil {
 			// Retriever 输出为空时仍需记录 FinalTopK=0
 			update.FinalTopK = 0
+			update.DocCount = 0
+			update.MaxVectorScore = 0
 			return update
 		}
 		update.FinalTopK = len(retrieverOut.Docs)
+		update.DocCount = len(retrieverOut.Docs)
+
+		// 计算最高相似度分数
+		var maxScore float64
+		for _, doc := range retrieverOut.Docs {
+			if doc.MetaData != nil {
+				if scoreVal, ok := doc.MetaData["score"]; ok {
+					if score, ok2 := scoreVal.(float64); ok2 && score > maxScore {
+						maxScore = score
+					}
+				}
+			}
+		}
+		update.MaxVectorScore = maxScore
+
 		// 序列化 top-3 检索结果（每条内容截断 500 字符，防止 LONGTEXT 字段过大）
 		type docInfo struct {
 			Content  string         `json:"content"`

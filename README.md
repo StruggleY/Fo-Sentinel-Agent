@@ -39,7 +39,7 @@ Fo-Sentinel-Agent 是面向企业安全运营的智能研判平台，通过多 A
 
 **核心能力**
 
-- **多 Agent 协同**：8 个专业 Agent 分工协作，覆盖对话、联网搜索、事件分析、报告生成、风险评估、解决方案、威胁情报、摘要压缩
+- **多 Agent 协同**：8 个专业 Agent 分工协作，覆盖智能对话、联网搜索、事件分析、报告生成、风险评估、解决方案、威胁情报、摘要压缩
 - **混合检索增强**：BM25 稀疏向量 + 语义稠密向量，RRF 融合排序，Rerank 精排，语义缓存加速
 - **深度思考模式**：Plan-Execute-Replan 循环架构，Supervisor-Worker 协同调度，处理复杂多步骤任务
 - **全链路可观测**：请求级和节点级追踪，记录耗时、成本、检索质量，支持问题定位和性能优化
@@ -48,6 +48,36 @@ Fo-Sentinel-Agent 是面向企业安全运营的智能研判平台，通过多 A
 本项目提供了企业级安全 AI 系统的完整工程实现，涵盖多轮对话记忆、RAG 检索质量、多 Agent 编排、深度推理、可观测性等关键技术问题的解决方案。
 
 ---
+
+**问答页面预览图：**
+
+![问答页面预览图.png](docs/images/问答页面预览图.png)
+
+![问答页面预览图2.png](docs/images/问答页面预览图2.png)
+
+![问答页面预览图3.png](docs/images/问答页面预览图3.png)
+
+**Agent 事件分析页面预览图：**
+
+![Agent 事件分析页面预览图.png](docs/images/Agent 事件分析页面预览图.png)
+
+**AI 知识库管理图：**
+
+![AI 知识库管理图.png](docs/images/AI 知识库管理图.png)
+
+![AI 知识库管理图2.png](docs/images/AI 知识库管理图2.png)
+
+![AI 知识库管理图3.png](docs/images/AI 知识库管理图3.png)
+
+**安全态势总览与实时监控：**
+
+![安全态势总览与实时监控.png](docs/images/安全态势总览与实时监控.png)
+
+**Agent 全链路观测：**
+
+![img_12.png](docs/images/Agent 全链路观测.png)
+
+![img_2.png](docs/images/Agent 全链路观测2.png)
 
 ## 系统架构
 

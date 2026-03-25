@@ -262,7 +262,7 @@ export default function EventAnalysis() {
       <div className="px-6 py-3 border-b border-gray-200 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
           <BrainCircuit className="w-5 h-5 text-primary-500" />
-          <span className="text-base font-semibold text-gray-900">多智能体协作研判</span>
+          <span className="text-base font-semibold text-gray-900">智能体研判</span>
           {savedAt && !isProcessing && (
             <span className="text-xs text-gray-400">
               上次分析：{new Date(savedAt).toLocaleString('zh-CN')}
