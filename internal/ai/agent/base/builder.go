@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"Fo-Sentinel-Agent/internal/ai/rerank"
-	"Fo-Sentinel-Agent/internal/ai/retriever"
+	"Fo-Sentinel-Agent/internal/ai/retrieval"
 	"Fo-Sentinel-Agent/internal/ai/rewrite"
 	"Fo-Sentinel-Agent/internal/ai/rule"
 	"Fo-Sentinel-Agent/internal/ai/split"
@@ -106,12 +106,8 @@ func BuildReactAgentGraph(ctx context.Context, cfg BuildConfig) (compose.Runnabl
 				}
 
 				// Step3：并发检索所有子查询，聚合去重
-				r, err := retriever.GetRetriever(ctx)
-				if err != nil {
-					g.Log().Warningf(ctx, "[RetrievalNode] 获取检索器失败: %v", err)
-					return nil, err
-				}
-				docs, err := retriever.MultiRetrieve(ctx, r, queries)
+				r := retrieval.GetRetriever()
+				docs, err := retrieval.MultiRetrieve(ctx, r, queries)
 				if err != nil {
 					g.Log().Warningf(ctx, "[RetrievalNode] 向量检索失败: %v", err)
 					return nil, err
@@ -120,7 +116,7 @@ func BuildReactAgentGraph(ctx context.Context, cfg BuildConfig) (compose.Runnabl
 
 				// Step4：Rerank 精排（GetClient 返回 nil 表示未启用，直接跳过）
 				if rc, _ := rerank.GetClient(ctx); rc != nil && len(docs) > 1 {
-					rerankResults := rc.Rerank(ctx, input.Query, docs, retriever.DefaultFinalTopK)
+					rerankResults := rc.Rerank(ctx, input.Query, docs, 3)
 					docs = make([]*schema.Document, 0, len(rerankResults))
 					for _, r := range rerankResults {
 						docs = append(docs, r.Doc)
@@ -151,11 +147,7 @@ func BuildReactAgentGraph(ctx context.Context, cfg BuildConfig) (compose.Runnabl
 		), compose.WithNodeName(InputToRag))
 
 		// MilvusRetriever：向量检索（内含 Redis 语义缓存，缓存命中跳过 Milvus）
-		r, err := retriever.GetRetriever(ctx)
-		if err != nil {
-			g.Log().Warningf(ctx, "[Builder] 获取检索器失败 | graph=%s: %v", cfg.GraphName, err)
-			return nil, err
-		}
+		r := retrieval.GetRetriever()
 		_ = graph.AddRetrieverNode(MilvusRetriever, r, compose.WithOutputKey("documents"))
 
 		_ = graph.AddEdge(compose.START, InputToRag)

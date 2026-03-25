@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"Fo-Sentinel-Agent/internal/ai/retriever"
+	"Fo-Sentinel-Agent/internal/ai/retrieval"
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -81,10 +81,7 @@ func NewSearchSimilarEventsTool() tool.InvokableTool {
 			}
 
 			g.Log().Infof(ctx, "[Tool] search_similar_events 开始 | query=%q | limit=%d", input.Query, input.Limit)
-			rr, rrErr := retriever.GetEventsRetriever(ctx)
-			if rrErr != nil {
-				return "", fmt.Errorf("retriever unavailable: %w", rrErr)
-			}
+			rr := retrieval.GetEventsRetriever()
 
 			docs, retErr := rr.Retrieve(ctx, input.Query)
 			if retErr != nil {

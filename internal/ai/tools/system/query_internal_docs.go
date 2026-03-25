@@ -1,7 +1,7 @@
 package system
 
 import (
-	"Fo-Sentinel-Agent/internal/ai/retriever"
+	"Fo-Sentinel-Agent/internal/ai/retrieval"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,16 +24,13 @@ func NewQueryInternalDocsTool() tool.InvokableTool {
 		func(ctx context.Context, input *QueryInternalDocsInput, opts ...tool.Option) (output string, err error) {
 			g.Log().Infof(ctx, "[Tool] query_internal_docs 开始 | query=%q", input.Query)
 			// GetDocumentsRetriever 只检索 documents 分区，避免混入安全事件内容。
-			rr, err := retriever.GetDocumentsRetriever(ctx)
-			if err != nil {
-				return "", fmt.Errorf("init retriever: %w", err)
-			}
+			rr := retrieval.GetDocumentsRetriever()
 			resp, err := rr.Retrieve(ctx, input.Query)
 			if err != nil {
 				return "", fmt.Errorf("retrieve docs: %w", err)
 			}
 			// 过滤掉已禁用文档的分块
-			resp = retriever.FilterDisabledDocs(ctx, resp)
+			resp = retrieval.FilterDisabledDocs(ctx, resp)
 			g.Log().Infof(ctx, "[Tool] query_internal_docs 完成 | 返回=%d 条", len(resp))
 			respBytes, _ := json.Marshal(resp)
 			return string(respBytes), nil

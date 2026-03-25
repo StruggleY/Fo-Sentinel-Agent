@@ -115,10 +115,14 @@ func NewQueryEventsTool() tool.InvokableTool {
 				}
 			}
 
+			// 启用SQL日志记录
+			q = q.Debug()
+
 			var events []dao.Event
 			if err = q.Find(&events).Error; err != nil {
 				return "", fmt.Errorf("query events: %w", err)
 			}
+
 			if len(events) == 0 {
 				return "[]", nil
 			}

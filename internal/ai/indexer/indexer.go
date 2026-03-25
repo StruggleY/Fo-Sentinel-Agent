@@ -80,7 +80,7 @@ func NewIndexer(ctx context.Context, partition string) (*einomilvus.Indexer, err
 		return nil, err
 	}
 
-	eb, err := embedder.DoubaoEmbedding(ctx)
+	eb, err := embedder.NewDenseEmbedder(ctx)
 	if err != nil {
 		return nil, err
 	}

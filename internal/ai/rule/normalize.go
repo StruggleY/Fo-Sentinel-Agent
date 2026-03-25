@@ -118,7 +118,7 @@ func Normalize(ctx context.Context, query string) string {
 	}
 
 	if changed {
-		g.Log().Debugf(ctx, "[Rule] 归一化完成 | 原始=%q | 归一化=%q", query, result)
+		g.Log().Debugf(ctx, "[Rule] 术语归一化完成 | 原始=%q | 归一化=%q", query, result)
 	}
 	return result
 }

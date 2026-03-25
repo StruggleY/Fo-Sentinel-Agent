@@ -9,7 +9,7 @@
 //
 //	同一文档可能被多个子查询命中（例如「高危漏洞」和「漏洞修复方案」都可能召回同一篇）。
 //	不去重会导致该文档在 LLM Prompt 中重复出现，占用 Token 且使 LLM 过度关注该文档。
-package retriever
+package retrieval
 
 import (
 	"context"

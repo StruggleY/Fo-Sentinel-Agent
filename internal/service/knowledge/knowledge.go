@@ -18,7 +18,7 @@ import (
 
 	pipeline "Fo-Sentinel-Agent/internal/ai/agent/knowledge_index_pipeline"
 	aidoc "Fo-Sentinel-Agent/internal/ai/document"
-	"Fo-Sentinel-Agent/internal/ai/retriever"
+	"Fo-Sentinel-Agent/internal/ai/retrieval"
 	milvus "Fo-Sentinel-Agent/internal/dao/milvus"
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 )
@@ -490,17 +490,14 @@ func SearchDocs(ctx context.Context, baseID, query string, topK int) ([]SearchRe
 	if topK <= 0 || topK > 20 {
 		topK = 5
 	}
-	rr, err := retriever.GetDocumentsRetriever(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("init retriever: %w", err)
-	}
+	rr := retrieval.GetDocumentsRetriever()
 	docs, err := rr.Retrieve(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("retrieve: %w", err)
 	}
 
 	// 过滤已禁用文档的分块
-	docs = retriever.FilterDisabledDocs(ctx, docs)
+	docs = retrieval.FilterDisabledDocs(ctx, docs)
 
 	// 按 base_id 过滤（Milvus 无分区级 base_id 过滤，在应用层补充）
 	filtered := make([]*schema.Document, 0, len(docs))

@@ -8,5 +8,5 @@ import (
 )
 
 func newEmbedding(ctx context.Context) (eb embedding.Embedder, err error) {
-	return embedder.DoubaoEmbedding(ctx)
+	return embedder.NewDenseEmbedder(ctx)
 }

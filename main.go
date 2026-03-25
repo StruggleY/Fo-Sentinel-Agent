@@ -3,7 +3,7 @@
 package main
 
 import (
-	"Fo-Sentinel-Agent/internal/ai/retriever"
+	"Fo-Sentinel-Agent/internal/ai/retrieval"
 	"Fo-Sentinel-Agent/internal/ai/rule"
 	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 	"Fo-Sentinel-Agent/internal/controller/auth"
@@ -56,8 +56,8 @@ func main() {
 
 	// ========== 阶段2：AI组件初始化 ==========
 	// 预热 Milvus Retriever 单例（向量检索 + 语义缓存）
-	if err := retriever.WarmUp(ctx); err != nil {
-		g.Log().Warningf(ctx, "retriever warmup failed: %v", err)
+	if err := retrieval.WarmUp(ctx); err != nil {
+		g.Log().Warningf(ctx, "retrieval warmup failed: %v", err)
 	}
 
 	// 加载术语归一化规则到进程内存

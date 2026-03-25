@@ -63,13 +63,44 @@ func hashToken(token string) uint32 {
 
 // BM25Embed 将文本编码为 BM25 稀疏向量。
 //
-// 算法说明：
-//   - 对文本分词后计算词频（TF）
-//   - 使用 BM25 公式：score(t,d) = TF(t,d)*(K1+1) / (TF(t,d) + K1*(1-B+B*|d|/avgDocLen))
-//   - token 通过 FNV-1a 哈希映射到 uint32 位置（稀疏向量下标）
-//   - 归一化：对所有分值做 L2 归一化
+// # 算法原理
 //
-// 返回的稀疏向量可直接用于 Milvus HybridSearch sparse_vector 字段。
+// **BM25 公式（简化版，无 IDF）：**
+//
+//	score(t,d) = TF(t,d) * (K1+1) / (TF(t,d) + K1 * (1-B + B*|d|/avgDocLen))
+//
+//	- TF(t,d): token t 在文档 d 中的词频
+//	- K1: 词频饱和系数（1.5），控制词频增长的边际效应
+//	- B: 文档长度归一化系数（0.75），惩罚过长文档
+//	- |d|: 当前文档长度（token 数）
+//	- avgDocLen: 全局平均文档长度（100）
+//
+// **稀疏向量编码：**
+//   - token → FNV-1a 哈希 → uint32 位置（24位空间，~16M桶）
+//   - 位置冲突时取最大分值（第97行）
+//   - 只存储非零维度（稀疏表示）
+//
+// **L2 归一化：**
+//
+//	norm = √(Σ score²)
+//	normalized_score = score / norm
+//
+//	作用：统一向量长度为1，使不同长度文档的分值可比
+//	示例：3个词频为1的token → 原始分值都是1.0 → 归一化后都是 1/√3 ≈ 0.57735
+//
+// # 返回值
+//
+// 返回的稀疏向量可直接用于 Milvus HybridSearch sparse_vector 字段（IP 内积检索）。
+//
+// # 常见现象
+//
+// **Q: 为什么多个 value 相同？**
+// A: 词频相同的 token 经过 BM25 计算和 L2 归一化后，分值自然相同。
+//
+//	例如："SQL注入漏洞" 分词为 3 个词频为 1 的 token，归一化后都是 0.57735。
+//
+// **Q: position 为什么不连续？**
+// A: position 是 token 的哈希值，不是顺序索引，分布在 0~16M 空间中。
 func BM25Embed(text string) (entity.SparseEmbedding, error) {
 	tokens := tokenize(text)
 	if len(tokens) == 0 {
@@ -91,6 +122,7 @@ func BM25Embed(text string) (entity.SparseEmbedding, error) {
 	// 计算 BM25 分值
 	scores := make(map[uint32]float32)
 	for token, freq := range tf {
+		// 将 token 映射到 uint32 位置
 		pos := hashToken(token)
 		score := freq * (BM25Params.K1 + 1) / (freq + BM25Params.K1*normFactor)
 		// 哈希碰撞时取最大值
