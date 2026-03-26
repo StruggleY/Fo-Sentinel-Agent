@@ -51,33 +51,33 @@ Fo-Sentinel-Agent 是面向企业安全运营的智能研判平台，通过多 A
 
 **问答页面预览图：**
 
-![问答页面预览图](docs/images/问答页面预览图.png)
+<img src="docs/images/问答页面预览图.png" width="100%" alt="问答页面预览图">
 
-![问答页面预览图2](docs/images/问答页面预览图2.png)
+<img src="docs/images/问答页面预览图2.png" width="100%" alt="问答页面预览图2">
 
-![问答页面预览图3](docs/images/问答页面预览图3.png)
+<img src="docs/images/问答页面预览图3.png" width="100%" alt="问答页面预览图3">
 
 **Agent 事件分析页面预览图：**
 
-![Agent事件分析页面预览图](docs/images/Agent事件分析页面预览图.png)
+<img src="docs/images/Agent事件分析页面预览图.png" width="100%" alt="Agent事件分析页面预览图">
 
 **AI 知识库管理图：**
 
-![AI知识库管理图](docs/images/AI知识库管理图.png)
+<img src="docs/images/AI知识库管理图.png" width="100%" alt="AI知识库管理图">
 
-![AI知识库管理图2](docs/images/AI知识库管理图2.png)
+<img src="docs/images/AI知识库管理图2.png" width="100%" alt="AI知识库管理图2">
 
-![AI知识库管理图3](docs/images/AI知识库管理图3.png)
+<img src="docs/images/AI知识库管理图3.png" width="100%" alt="AI知识库管理图3">
 
 **安全态势总览与实时监控：**
 
-![安全态势总览与实时监控](docs/images/安全态势总览与实时监控.png)
+<img src="docs/images/安全态势总览与实时监控.png" width="100%" alt="安全态势总览与实时监控">
 
 **Agent 全链路观测：**
 
-![Agent全链路观测](docs/images/Agent全链路观测.png)
+<img src="docs/images/Agent全链路观测.png" width="100%" alt="Agent全链路观测">
 
-![Agent全链路观测2](docs/images/Agent全链路观测2.png)
+<img src="docs/images/Agent全链路观测2.png" width="100%" alt="Agent全链路观测2">
 
 ## 系统架构
 
