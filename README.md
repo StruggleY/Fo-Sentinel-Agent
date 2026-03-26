@@ -1,6 +1,6 @@
 # Fo-Sentinel-Agent
 
-**安全事件智能研判多智能体协同平台** — 通过多 Agent AI 架构自动化安全事件监控、分析与响应
+**安全事件智能研判多智能体协同平台** — 基于大语言模型的新一代安全运营自动化系统，通过 8 个专业 AI Agent 协同工作，实现安全事件的智能监控、深度分析、风险评估与应急响应。系统融合 RAG 检索增强、联网威胁情报、全链路可观测性等先进技术，将传统需要数小时的人工研判工作压缩至分钟级，显著提升安全团队的响应效率和决策质量。
 
 ![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)
 ![GoFrame](https://img.shields.io/badge/GoFrame-v2.7.1-blue?style=flat)
