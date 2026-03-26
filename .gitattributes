@@ -1,0 +1,10 @@
+# 将前端代码标记为 vendored，排除在语言统计之外
+web/* linguist-vendored
+
+# 确保 Go 代码被正确识别
+*.go linguist-language=Go
+
+# 文档和配置文件不计入统计
+*.md linguist-documentation
+*.yaml linguist-documentation
+*.yml linguist-documentation
