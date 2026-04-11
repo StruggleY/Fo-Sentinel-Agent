@@ -55,7 +55,16 @@ func ExecuteDeepThink(ctx context.Context, sessionId, query string, onOutput fun
 	}
 	mem.SetMessages(schema.UserMessage(query))
 
-	// 调用 Plan Agent
+	// 阶段一：预思考（流式推送 think 事件，错误不中断主流程）
+	onOutput(string(core.IntentStatus), "深度思考中...")
+	thinkErr := plan_pipeline.StreamThinkChunks(ctx, query, func(chunk string) {
+		onOutput(string(core.IntentPlanStep), plan_pipeline.MarshalThinkChunk(chunk))
+	})
+	if thinkErr != nil {
+		g.Log().Warningf(ctx, "[Intent] 预思考阶段失败，继续执行 Plan Agent | session=%s | err=%v", sessionId, thinkErr)
+	}
+
+	// 阶段二：Plan Agent（任务规划 + 执行）
 	onOutput(string(core.IntentStatus), "[Plan Agent 规划执行...]")
 	content, execErr := plan_pipeline.BuildPlanAgent(ctx, query,
 		func(chunk string) { onOutput(string(core.IntentPlanStep), chunk) }, // 中间步骤 → 规划过程块

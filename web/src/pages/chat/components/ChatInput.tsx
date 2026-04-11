@@ -56,8 +56,12 @@ export default function ChatInput({
         className={cn(
           'relative rounded-2xl border bg-white transition-all duration-200',
           isFocused
-            ? 'border-[#93C5FD] shadow-[0_0_0_3px_rgba(147,197,253,0.3)]'
-            : 'border-[#E5E7EB] shadow-sm hover:border-[#D1D5DB]',
+            ? deepThinking
+              ? 'border-[#A78BFA] shadow-[0_0_0_3px_rgba(167,139,250,0.25)]'
+              : 'border-[#93C5FD] shadow-[0_0_0_3px_rgba(147,197,253,0.3)]'
+            : deepThinking
+              ? 'border-[#DDD6FE] shadow-sm hover:border-[#C4B5FD]'
+              : 'border-[#E5E7EB] shadow-sm hover:border-[#D1D5DB]',
         )}
       >
         <textarea
@@ -69,7 +73,13 @@ export default function ChatInput({
           onCompositionEnd={() => { isComposingRef.current = false }}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
-          placeholder="输入消息…"
+          placeholder={
+            deepThinking
+              ? '描述您的研判任务，深度思考模式将自动规划并协调多个 Agent…'
+              : webSearch
+              ? '输入问题，联网搜索将自动检索最新威胁情报与漏洞资讯…'
+              : '输入消息…'
+          }
           rows={1}
           disabled={isLoading}
           className="w-full resize-none bg-transparent px-4 pt-3.5 pb-14 text-base text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none disabled:opacity-60"

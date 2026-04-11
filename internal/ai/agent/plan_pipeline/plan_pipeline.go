@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
@@ -11,6 +12,71 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"
 )
+
+// PlanStepMsg 是推送给前端的结构化步骤事件，JSON 序列化后通过 SSE plan_step 事件发送。
+// 前端按 type 字段分类渲染：规划步骤清单、执行推理摘要、Worker 结果摘要。
+type PlanStepMsg struct {
+	Type    string   `json:"type"`              // "plan_steps" | "exec" | "tool_result"
+	Steps   []string `json:"steps,omitempty"`   // plan_steps：Planner 生成的步骤列表
+	Content string   `json:"content,omitempty"` // exec/tool_result：内容或摘要
+	Name    string   `json:"name,omitempty"`    // tool_result：工具友好名称
+}
+
+// uuidPattern 匹配标准 UUID 格式（xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）。
+var uuidPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+
+// stripUUIDs 从文本中移除所有 UUID，并清理多余空白，避免技术性 ID 暴露给用户。
+func stripUUIDs(s string) string {
+	// 移除 UUID 及其紧邻的空白
+	cleaned := uuidPattern.ReplaceAllString(s, "")
+	// 清理连续空白（包括换行后残留的空行）
+	lines := strings.Split(cleaned, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		out = append(out, line)
+	}
+	// 合并连续空行为最多一个空行
+	result := strings.Join(out, "\n")
+	for strings.Contains(result, "\n\n\n") {
+		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
+	}
+	return strings.TrimSpace(result)
+}
+
+// workerFriendlyName 将内部工具名映射为用户可读的中文名称。
+func workerFriendlyName(toolName string) string {
+	switch toolName {
+	case "event_analysis_agent":
+		return "事件分析"
+	case "report_agent":
+		return "报告生成"
+	case "risk_assessment_agent":
+		return "风险评估"
+	case "solve_agent":
+		return "应急响应"
+	case "intelligence_agent":
+		return "威胁情报"
+	case "query_internal_docs":
+		return "知识库检索"
+	case "get_current_time":
+		return "获取时间"
+	default:
+		if toolName != "" {
+			return toolName
+		}
+		return "工具执行"
+	}
+}
+
+// marshalStepMsg 序列化步骤事件为 JSON 字符串，序列化失败时返回内容原文。
+func marshalStepMsg(msg PlanStepMsg) string {
+	b, err := json.Marshal(msg)
+	if err != nil {
+		return msg.Content
+	}
+	return string(b)
+}
 
 // BuildPlanAgent 驱动完整的 Plan-Execute-Replan 循环，通过两个回调实时流式推送输出。
 //
@@ -96,14 +162,23 @@ func BuildPlanAgent(ctx context.Context, query string, onStep func(string), onFi
 			continue
 		}
 
-		// Tool 消息：Worker 工具的执行结果，直接作为步骤内容推送
+		// Tool 消息：Worker 工具执行结果，只推送前 150 字摘要，完整内容仍写入 fullContent
 		if msg.Role == schema.Tool {
 			content := strings.TrimSpace(msg.Content)
 			if content == "" {
 				continue
 			}
 			if onStep != nil {
-				onStep(content)
+				summary := content
+				runes := []rune(content)
+				if len(runes) > 150 {
+					summary = string(runes[:150]) + "…"
+				}
+				onStep(marshalStepMsg(PlanStepMsg{
+					Type:    "tool_result",
+					Name:    workerFriendlyName(msg.ToolName),
+					Content: summary,
+				}))
 			}
 			fullContent += content + "\n"
 			continue
@@ -114,8 +189,16 @@ func BuildPlanAgent(ctx context.Context, query string, onStep func(string), onFi
 			continue
 		}
 
-		// 带 ToolCalls 的 Assistant 消息（LLM 决定调用工具）→ 跳过
+		// 带 ToolCalls 的 Assistant 消息（Executor 决定调用 Worker）→ 推送 tool_call 事件
 		if len(msg.ToolCalls) != 0 {
+			if onStep != nil {
+				for _, tc := range msg.ToolCalls {
+					onStep(marshalStepMsg(PlanStepMsg{
+						Type: "tool_call",
+						Name: workerFriendlyName(tc.Function.Name),
+					}))
+				}
+			}
 			continue
 		}
 
@@ -125,22 +208,32 @@ func BuildPlanAgent(ctx context.Context, query string, onStep func(string), onFi
 		}
 		// JSON 输出：Planner（Plan JSON）或 Replanner（Plan/Respond JSON）
 		if strings.HasPrefix(trimmed, "{") {
-			// 尝试解析为 Respond 工具的输出
+			// 尝试解析为 Plan（步骤列表），推送规划方案给前端
+			var planParsed struct {
+				Steps []string `json:"steps"`
+			}
+			if json.Unmarshal([]byte(trimmed), &planParsed) == nil && len(planParsed.Steps) > 0 {
+				if onStep != nil {
+					onStep(marshalStepMsg(PlanStepMsg{Type: "plan_steps", Steps: planParsed.Steps}))
+				}
+			}
+			// 尝试解析为 Respond 工具的输出（Replanner 终止信号）
 			var resp planexecute.Response
 			if json.Unmarshal([]byte(trimmed), &resp) == nil && resp.Response != "" {
 				finalAnswer = resp.Response
 			}
 			continue
 		}
-		// Executor 自然语言文本输出 → 推送为 plan_step
+		// Executor 自然语言推理输出 → 推送为 exec 类型步骤
 		if onStep != nil {
-			onStep(msg.Content)
+			onStep(marshalStepMsg(PlanStepMsg{Type: "exec", Content: msg.Content}))
 		}
 		fullContent += msg.Content + "\n"
 	}
 
 	// 优先使用 Replanner Respond 解析出的最终答案
 	if finalAnswer != "" {
+		finalAnswer = stripUUIDs(finalAnswer)
 		if onFinal != nil {
 			onFinal(finalAnswer)
 		}
@@ -151,6 +244,7 @@ func BuildPlanAgent(ctx context.Context, query string, onStep func(string), onFi
 	if fullContent == "" {
 		return "", fmt.Errorf("plan agent 未产生任何文本输出")
 	}
+	fullContent = stripUUIDs(fullContent)
 	if onFinal != nil {
 		onFinal(fullContent)
 	}

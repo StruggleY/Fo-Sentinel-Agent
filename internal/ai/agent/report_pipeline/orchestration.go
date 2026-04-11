@@ -20,7 +20,7 @@ var GetReportAgent = agent.NewSingletonAgent(agent.AgentConfig{
 	GraphName:      "ReportAgent",
 	SystemPrompt:   agents.Report,
 	ModelFactory:   models.OpenAIForDeepSeekV31Think,
-	MaxStep:        15,
+	MaxStep:        30,
 	RewriteEnabled: true,
 	SplitEnabled:   true,
 	ToolNames: []string{

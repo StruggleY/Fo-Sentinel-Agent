@@ -57,6 +57,10 @@ Fo-Sentinel-Agent 是面向企业安全运营的智能研判平台，通过多 A
 
 <img src="docs/images/问答页面预览图3.png" width="100%" alt="问答页面预览图3">
 
+<img src="docs/images/问答页面预览图4.png" width="100%" alt="问答页面预览图4">
+
+<img src="docs/images/问答页面预览图5.png" width="100%" alt="问答页面预览图5">
+
 **Agent 事件分析页面预览图：**
 
 <img src="docs/images/Agent事件分析页面预览图.png" width="100%" alt="Agent事件分析页面预览图">

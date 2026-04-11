@@ -138,13 +138,15 @@ export default function DocList({ baseID }: Props) {
 
             {/* 主信息 */}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-800 truncate" title={doc.name}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium text-gray-800 truncate flex-shrink" title={doc.name}>
                   {doc.name}
                 </span>
-                <StatusBadge status={doc.index_status} />
+                <span className="flex-shrink-0">
+                  <StatusBadge status={doc.index_status} />
+                </span>
               </div>
-              <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-400">
+              <div className="flex items-center gap-3 text-xs text-gray-400">
                 <span>{doc.file_type?.toUpperCase()}</span>
                 <span>{formatSize(doc.file_size)}</span>
                 {doc.index_status === 'completed' && (

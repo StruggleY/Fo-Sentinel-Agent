@@ -1,3 +1,5 @@
+name: Fo-Sentinel-Agent
+
 services:
   etcd:
     container_name: milvus-etcd
@@ -73,7 +75,7 @@ services:
     container_name: redis
     image: redis:7.4-alpine
     ports:
-      - "6379:6379"
+      - "16379:6379"
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/redis:/data
     # appendonly yes 开启 AOF 持久化，服务重启后语义缓存数据不丢失

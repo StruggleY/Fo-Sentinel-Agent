@@ -34,7 +34,7 @@ file_dir: "docs"
 
 # ── Redis ──────────────────────────────────────────────────────────────────────
 redis:
-  addr: "localhost:6379"
+  addr: "localhost:16379"
   password: ""
   db: 0
 

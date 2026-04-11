@@ -20,7 +20,7 @@ import (
 // SaveIntelligenceInput save_intelligence 工具输入参数
 type SaveIntelligenceInput struct {
 	Title     string `json:"title" jsonschema:"description=情报标题，简洁明确，包含 CVE ID 或关键词"`
-	Content   string `json:"content" jsonschema:"description=完整的威胁分析内容，包括攻击向量、影响范围、缓解建议等"`
+	Content   string `json:"content" jsonschema:"description=威胁分析核心摘要（必须控制在600字以内），包含：漏洞原理/攻击向量/影响版本/修复建议，禁止传入完整长报告"`
 	Severity  string `json:"severity" jsonschema:"description=严重程度：critical（CVSS 9.0+）/ high（7.0-8.9）/ medium（4.0-6.9）/ low（0-3.9）"`
 	CVEID     string `json:"cve_id,omitempty" jsonschema:"description=CVE 编号，如 CVE-2024-1234，可选"`
 	Source    string `json:"source,omitempty" jsonschema:"description=情报来源标识，由系统自动填充，无需手动指定"`
@@ -45,6 +45,10 @@ func NewSaveIntelligenceTool() tool.InvokableTool {
 			}
 			if strings.TrimSpace(input.Content) == "" {
 				return "", fmt.Errorf("content 不能为空")
+			}
+			// 服务端截断兜底：防止 LLM 生成超长 content 导致工具调用 JSON 被截断
+			if runes := []rune(input.Content); len(runes) > 800 {
+				input.Content = string(runes[:800]) + "…（内容已截断）"
 			}
 
 			// 规范化 severity

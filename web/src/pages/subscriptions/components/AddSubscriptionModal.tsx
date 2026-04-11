@@ -85,9 +85,6 @@ export default function AddSubscriptionModal({
     url: editMode && initialData ? initialData.source_url : '',
     fetch_interval: editMode && initialData ? cronToMinutes(initialData.cron_expr) : 60,
     fetch_immediately: false,
-    keywords: '',
-    auth_type: 'none',
-    auth_config: '',
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -118,22 +115,13 @@ export default function AddSubscriptionModal({
           }
         }
       } else {
-        const config: Record<string, unknown> = {}
-        if (formData.keywords) {
-          config.keywords = formData.keywords.split(',').map(k => k.trim())
-        }
-        if (formData.auth_type !== 'none') {
-          config.auth_type = formData.auth_type
-          config.auth_config = formData.auth_config
-        }
-
         const { id } = await subscriptionService.create({
           name: formData.name,
           description: '',
           source_type: sourceType as SourceType,
           source_url: formData.url,
           cron_expr: minutesToCron(formData.fetch_interval),
-          config: Object.keys(config).length > 0 ? JSON.stringify(config) : '',
+          config: '',
         })
         toast.success('订阅创建成功')
 
@@ -163,7 +151,7 @@ export default function AddSubscriptionModal({
   const handleClose = () => {
     setStep(1)
     setSourceType('')
-    setFormData({ name: '', url: '', fetch_interval: 60, fetch_immediately: false, keywords: '', auth_type: 'none', auth_config: '' })
+    setFormData({ name: '', url: '', fetch_interval: 60, fetch_immediately: false })
     onClose()
   }
 
@@ -260,19 +248,6 @@ export default function AddSubscriptionModal({
                   />
                 </div>
 
-                {/* Keywords */}
-                <div className="form-item">
-                  <label className="label">关键词过滤</label>
-                  <input
-                    type="text"
-                    value={formData.keywords}
-                    onChange={(e) => setFormData({ ...formData, keywords: e.target.value })}
-                    placeholder="多个关键词用逗号分隔"
-                    className="input"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">只抓取包含这些关键词的事件</p>
-                </div>
-
                 {/* Fetch Interval */}
                 <div className="form-item">
                   <label className="label">抓取间隔</label>
@@ -316,41 +291,6 @@ export default function AddSubscriptionModal({
                       )}
                     </div>
                   </button>
-
-                {/* Auth Type */}
-                <div className="form-item">
-                  <label className="label">认证方式</label>
-                  <CustomSelect
-                    value={formData.auth_type}
-                    onChange={v => setFormData({ ...formData, auth_type: v })}
-                    options={[
-                      { value: 'none', label: '无需认证' },
-                      { value: 'api_key', label: 'API Key' },
-                      { value: 'basic', label: 'Basic Auth' },
-                      { value: 'bearer', label: 'Bearer Token' },
-                      { value: 'oauth2', label: 'OAuth 2.0' },
-                    ] satisfies SelectOption[]}
-                  />
-                </div>
-
-                {/* Auth Config */}
-                {formData.auth_type !== 'none' && (
-                  <div className="form-item">
-                    <label className="label">
-                      {formData.auth_type === 'api_key' && 'API Key'}
-                      {formData.auth_type === 'basic' && '用户名:密码'}
-                      {formData.auth_type === 'bearer' && 'Token'}
-                      {formData.auth_type === 'oauth2' && 'OAuth 配置 (JSON)'}
-                    </label>
-                    <input
-                      type={formData.auth_type === 'basic' ? 'password' : 'text'}
-                      value={formData.auth_config}
-                      onChange={(e) => setFormData({ ...formData, auth_config: e.target.value })}
-                      placeholder="输入认证信息"
-                      className="input"
-                    />
-                  </div>
-                )}
               </div>
             )}
           </div>

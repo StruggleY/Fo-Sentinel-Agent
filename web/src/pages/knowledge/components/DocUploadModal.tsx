@@ -189,15 +189,17 @@ export default function DocUploadModal({ baseID, baseName, onClose, onSuccess }:
                         entry.status === 'uploading' ? 'bg-blue-50' : 'bg-gray-50',
                       )}
                     >
-                      {entry.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />}
-                      {entry.status === 'error'   && <XCircle      className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />}
-                      {entry.status === 'uploading' && <Loader2    className="w-3.5 h-3.5 text-blue-500 animate-spin flex-shrink-0" />}
-                      {entry.status === 'pending'  && <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-300 flex-shrink-0" />}
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        {entry.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />}
+                        {entry.status === 'error'   && <XCircle      className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />}
+                        {entry.status === 'uploading' && <Loader2    className="w-3.5 h-3.5 text-blue-500 animate-spin flex-shrink-0" />}
+                        {entry.status === 'pending'  && <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-300 flex-shrink-0" />}
 
-                      <span className="flex-1 truncate text-gray-700" title={entry.file.name}>{entry.file.name}</span>
+                        <span className="flex-1 truncate text-gray-700 min-w-0" title={entry.file.name}>{entry.file.name}</span>
+                      </div>
                       <span className="text-gray-400 flex-shrink-0">{formatSize(entry.file.size)}</span>
                       {entry.status === 'error' && entry.error && (
-                        <span className="text-red-500 truncate max-w-[100px]" title={entry.error}>{entry.error}</span>
+                        <span className="text-red-500 truncate max-w-[100px] flex-shrink-0" title={entry.error}>{entry.error}</span>
                       )}
                       {!uploading && entry.status !== 'uploading' && (
                         <button

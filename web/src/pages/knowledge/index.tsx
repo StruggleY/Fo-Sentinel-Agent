@@ -826,17 +826,17 @@ export default function Knowledge() {
                 <table className="table w-full" style={{ tableLayout: 'fixed', minWidth: '1280px' }}>
                   <colgroup>
                     <col style={{ width: '44px' }} />
-                    <col style={{ width: '240px' }} />
+                    <col style={{ width: '170px' }} />
                     <col style={{ width: '64px' }} />
                     <col style={{ width: '80px' }} />
+                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '80px' }} />
+                    <col style={{ width: '80px' }} />
+                    <col style={{ width: '80px' }} />
                     <col style={{ width: '100px' }} />
-                    <col style={{ width: '80px' }} />
-                    <col style={{ width: '80px' }} />
-                    <col style={{ width: '80px' }} />
-                    <col style={{ width: '80px' }} />
-                    <col style={{ width: '56px' }} />
+                    <col style={{ width: '72px' }} />
                     <col style={{ width: '148px' }} />
-                    <col style={{ width: '216px' }} />
+                    <col style={{ width: '250px' }} />
                   </colgroup>
                   <thead>
                     <tr>

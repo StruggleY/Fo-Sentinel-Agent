@@ -21,7 +21,7 @@ var GetRiskAgent = agent.NewSingletonAgent(agent.AgentConfig{
 	GraphName:      "RiskAgent",
 	SystemPrompt:   agents.Risk,
 	ModelFactory:   models.OpenAIForDeepSeekV31Think,
-	MaxStep:        15,
+	MaxStep:        25,
 	RewriteEnabled: true,
 	SplitEnabled:   true,
 	ToolNames: []string{

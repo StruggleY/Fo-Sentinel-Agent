@@ -965,3 +965,33 @@
 .chat-markdown a { @apply text-[#2563EB] no-underline hover:underline; }
 .chat-markdown img { @apply max-w-full h-auto rounded-xl my-3; }
 .chat-markdown hr { @apply border-none border-t border-[#E5E7EB] my-4; }
+
+/* 思考块 Markdown 渲染（蓝色主题，字号紧凑） */
+.think-markdown p { @apply mt-0 mb-2 leading-relaxed; }
+.think-markdown p:last-child { @apply mb-0; }
+.think-markdown h1, .think-markdown h2, .think-markdown h3, .think-markdown h4 {
+  @apply mt-3 mb-1.5 font-semibold leading-snug text-[#0369A1];
+}
+.think-markdown h1 { @apply text-sm; }
+.think-markdown h2 { @apply text-[0.8rem]; }
+.think-markdown h3, .think-markdown h4 { @apply text-xs; }
+.think-markdown ul, .think-markdown ol { @apply mt-0 mb-2 pl-4; }
+.think-markdown li { @apply mb-1; }
+.think-markdown strong { @apply font-semibold text-[#0369A1]; }
+.think-markdown em { @apply text-[#0284C7] not-italic; }
+.think-markdown code {
+  @apply px-1 py-0.5 rounded font-mono text-[0.85em];
+  background: #BAE6FD;
+  color: #0C4A6E;
+}
+.think-markdown blockquote {
+  @apply pl-3 border-l-2 my-2 italic;
+  border-color: #7DD3FC;
+  color: #0369A1;
+}
+.think-markdown table { @apply border-collapse w-full my-2 text-xs; }
+.think-markdown th, .think-markdown td {
+  @apply border border-[#BAE6FD] px-2 py-1 text-left;
+}
+.think-markdown th { @apply bg-[#E0F2FE] font-semibold text-[#0369A1]; }
+.think-markdown hr { @apply border-none border-t border-[#BAE6FD] my-3; }
