@@ -4,9 +4,11 @@ import { cn } from '@/utils'
 import toast from 'react-hot-toast'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { settingsService } from '@/services/settings'
+import { useAuthStore } from '@/stores/authStore'
 
 export default function Settings() {
   const { siteName, autoMarkRead, setSettings } = useSettingsStore()
+  const { username, role, logout } = useAuthStore()
   const [draftName, setDraftName] = useState(siteName)
   const [isSaving, setIsSaving] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -88,13 +90,13 @@ export default function Settings() {
                     <User className="h-6 w-6 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-base font-semibold text-gray-900">Admin</h3>
-                    <p className="text-sm text-gray-500">管理员</p>
+                    <h3 className="text-base font-semibold text-gray-900">{username || 'User'}</h3>
+                    <p className="text-sm text-gray-500">{role === 'admin' ? '管理员' : '普通用户'}</p>
                   </div>
                 </div>
                 <button
                   onClick={() => {
-                    localStorage.removeItem('token')
+                    logout()
                     window.location.href = '/login'
                   }}
                   className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"

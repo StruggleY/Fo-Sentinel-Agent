@@ -12,12 +12,13 @@ const severityConfig: Record<string, { label: string; class: string }> = {
   info: { label: '信息', class: 'severity-info' },
 }
 
-export default function RecentEvents() {
+export default function RecentEvents({ refreshKey }: { refreshKey?: number }) {
   const [events, setEvents] = useState<SecurityEvent[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchEvents = async () => {
+      setLoading(true)
       try {
         const res = await eventService.list({ page: 1, size: 5 })
         setEvents(res.list || [])
@@ -28,7 +29,7 @@ export default function RecentEvents() {
       }
     }
     fetchEvents()
-  }, [])
+  }, [refreshKey])
 
   if (loading) {
     return (

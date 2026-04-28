@@ -11,7 +11,7 @@ interface SeverityCount {
   info: number
 }
 
-export default function SeverityDistribution() {
+export default function SeverityDistribution({ refreshKey }: { refreshKey?: number }) {
   const [loading, setLoading] = useState(true)
   const [counts, setCounts] = useState<SeverityCount>({
     critical: 0,
@@ -23,6 +23,7 @@ export default function SeverityDistribution() {
 
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true)
       try {
         const stats = await eventService.getStats()
         const bySeverity = stats.by_severity
@@ -40,7 +41,7 @@ export default function SeverityDistribution() {
       }
     }
     fetchData()
-  }, [])
+  }, [refreshKey])
 
   if (loading) {
     return (

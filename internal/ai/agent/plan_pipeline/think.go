@@ -9,24 +9,11 @@ import (
 	"strings"
 
 	"Fo-Sentinel-Agent/internal/ai/models"
+	"Fo-Sentinel-Agent/internal/ai/prompt/agents"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"
 )
-
-// thinkingSystemPrompt 指导模型以安全专家视角深度思考用户问题。
-// 只输出推理过程，不给出最终结论，为后续 Plan Agent 规划奠定分析基础。
-const thinkingSystemPrompt = `你是一位资深网络安全专家和系统分析师。
-用户即将提出一个安全研判相关的问题，在制定分析计划之前，请先输出你的完整思考过程：
-
-思考要求：
-1. 理解问题本质：用户真正想知道什么？问题背后的业务场景是什么？
-2. 分析关键维度：涉及哪些安全领域（事件分析/风险评估/威胁情报/应急响应）？
-3. 识别约束条件：时间范围、严重程度、资产范围等关键约束
-4. 确定分析路径：应该按什么顺序分析，为什么这个顺序最优？
-5. 预判关键挑战：分析过程中可能遇到的数据缺失、模糊判断点
-
-使用中文，思考过程应清晰、有条理、体现专业判断，不需要给出最终答案。`
 
 // ThinkChunkMsg 是思考阶段推送给前端的事件结构，通过 plan_step SSE 事件发送。
 type ThinkChunkMsg struct {
@@ -59,7 +46,7 @@ func StreamThinkChunks(ctx context.Context, query string, onChunk func(string)) 
 	}
 
 	msgs := []*schema.Message{
-		schema.SystemMessage(thinkingSystemPrompt),
+		schema.SystemMessage(agents.ThinkingSystem),
 		schema.UserMessage(query),
 	}
 

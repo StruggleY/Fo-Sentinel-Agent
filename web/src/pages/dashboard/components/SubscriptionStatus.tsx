@@ -22,12 +22,13 @@ const statusConfig = {
   },
 }
 
-export default function SubscriptionStatus() {
+export default function SubscriptionStatus({ refreshKey }: { refreshKey?: number }) {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchSubscriptions = async () => {
+      setLoading(true)
       try {
         const res = await subscriptionService.list(1, 5)
         setSubscriptions(res.list || [])
@@ -38,7 +39,7 @@ export default function SubscriptionStatus() {
       }
     }
     fetchSubscriptions()
-  }, [])
+  }, [refreshKey])
 
   if (loading) {
     return (

@@ -69,13 +69,15 @@ func main() {
 	// ========== 阶段3：HTTP服务器配置 ==========
 	s := g.Server()
 	s.Group("/api", func(group *ghttp.RouterGroup) {
-		// 中间件链：CORS → 响应格式化 → JWT认证
+		// 中间件链：CORS → 响应格式化 → JWT认证 → 限流（限流依赖 JWT 解析的 user_id）
 		group.Middleware(middleware.CORSMiddleware)
 		group.Middleware(middleware.ResponseMiddleware)
-		group.Middleware(middleware.JWTMiddleware()) // auth.jwt.enabled=true 时生效，登录接口自动放行
-		// 绑定控制器：认证、聊天、事件、订阅、报告
-		group.Bind(auth.NewV1())
+		group.Middleware(middleware.JWTMiddleware())
+		group.Middleware(middleware.RateLimitMiddleware)
+		// SSE 接口注册
 		group.Bind(chat.NewV1())
+		// 绑定其余控制器
+		group.Bind(auth.NewV1())
 		group.Bind(event.NewV1())
 		group.Bind(subscription.NewV1())
 		group.Bind(report.NewV1())

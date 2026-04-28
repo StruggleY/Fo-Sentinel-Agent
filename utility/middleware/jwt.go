@@ -19,8 +19,8 @@ func JWTMiddleware(allowedRoles ...string) ghttp.HandlerFunc {
 			r.Middleware.Next()
 			return
 		}
-		// 登录接口不校验 JWT
-		if strings.Contains(r.URL.Path, "/auth/v1/login") {
+		// 登录/注册接口不校验 JWT
+		if strings.Contains(r.URL.Path, "/auth/v1/login") || strings.Contains(r.URL.Path, "/auth/v1/register") {
 			r.Middleware.Next()
 			return
 		}

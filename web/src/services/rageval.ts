@@ -88,7 +88,11 @@ interface ApiWrap<T> { data: T }
 export const ragevalService = {
   async getDashboard(window = '24h'): Promise<DashboardMetrics> {
     const res = await api.get<ApiWrap<DashboardMetrics>>('/rageval/v1/dashboard', { params: { window } })
-    return res.data.data!
+    return res.data.data ?? {
+      success_rate: 0, avg_latency_ms: 0, p95_latency_ms: 0, total_runs: 0,
+      avg_retrieved_docs: 0, avg_top_score: 0,
+      success_rate_status: 'good', latency_status: 'good', trends: [],
+    }
   },
 
   async listTraces(params?: {

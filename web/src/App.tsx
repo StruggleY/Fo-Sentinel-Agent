@@ -12,12 +12,20 @@ import Traces from './pages/traces'
 import TraceDetail from './pages/traces/detail'
 import Knowledge from './pages/knowledge'
 import RagEval from './pages/rag-eval'
+import Login from './pages/login'
+import { useAuthStore } from './stores/authStore'
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const token = useAuthStore((s) => s.token) ?? localStorage.getItem('token')
+  return token ? <>{children}</> : <Navigate to="/login" replace />
+}
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Layout />}>
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="subscriptions" element={<Subscriptions />} />

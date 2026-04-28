@@ -25,13 +25,28 @@ export function streamFetch(
   onError?: (e: Error) => void,
   signal?: AbortSignal
 ): void {
+  const token = localStorage.getItem('token')
   fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
     signal,
   })
     .then(async res => {
+      // 处理限流/并发/认证 HTTP 错误（非 SSE 流）
+      if (!res.ok) {
+        const errMap: Record<number, string> = {
+          401: '请先登录',
+          429: '请求过于频繁，请稍后重试',
+          503: '当前请求过多，请稍后重试',
+        }
+        const msg = errMap[res.status] ?? `请求失败（${res.status}）`
+        onError?.(new Error(msg))
+        return
+      }
       const reader = res.body?.getReader()
       if (!reader) { onDone(); return }
 

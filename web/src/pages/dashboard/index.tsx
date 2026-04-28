@@ -723,6 +723,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
   const [stats, setStats] = useState<DashboardStats>({
     eventCount: 0,
     subscriptionCount: 0,
@@ -788,6 +789,7 @@ export default function Dashboard() {
 
   const handleRefresh = () => {
     setRefreshing(true)
+    setRefreshKey(k => k + 1)
     fetchStats()
   }
 
@@ -844,13 +846,13 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <DashCard className="min-w-0 lg:col-span-2">
               <div className="mb-3 text-sm font-semibold text-slate-700">事件趋势</div>
-              <EventTrendChart />
+              <EventTrendChart refreshKey={refreshKey} />
             </DashCard>
             <DashCard>
               <div className="mb-3 text-sm font-semibold text-slate-700">
                 严重级别分布
               </div>
-              <SeverityDistribution />
+              <SeverityDistribution refreshKey={refreshKey} />
             </DashCard>
           </div>
 
@@ -867,7 +869,7 @@ export default function Dashboard() {
                 </a>
               </div>
               <div className="-mx-5 -mb-5 mt-3 overflow-hidden rounded-b-2xl flex-1">
-                <RecentEvents />
+                <RecentEvents refreshKey={refreshKey} />
               </div>
             </DashCard>
             <DashCard className="flex flex-col h-full">
@@ -881,7 +883,7 @@ export default function Dashboard() {
                 </a>
               </div>
               <div className="-mx-5 -mb-5 mt-3 overflow-hidden rounded-b-2xl flex-1">
-                <SubscriptionStatus />
+                <SubscriptionStatus refreshKey={refreshKey} />
               </div>
             </DashCard>
           </div>

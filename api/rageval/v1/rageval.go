@@ -6,7 +6,7 @@ import "github.com/gogf/gf/v2/frame/g"
 // DashboardReq KPI 汇总请求
 type DashboardReq struct {
 	g.Meta `path:"/rageval/v1/dashboard" method:"GET" tags:"RagEval" summary:"RAG质量KPI汇总"`
-	Window string `json:"window" d:"24h"` // 24h / 7d / 30d
+	Window string `json:"window" p:"window" d:"24h"` // 24h / 7d / 30d
 }
 
 // DashboardRes KPI 汇总响应
@@ -28,9 +28,9 @@ type DashboardRes struct {
 // TracesReq 最近 RAG 链路列表请求
 type TracesReq struct {
 	g.Meta   `path:"/rageval/v1/traces" method:"GET" tags:"RagEval" summary:"最近RAG链路列表"`
-	Page     int    `json:"page" d:"1"`
-	PageSize int    `json:"page_size" d:"5"`
-	Status   string `json:"status"` // 过滤 success/error
+	Page     int    `json:"page" p:"page" d:"1"`
+	PageSize int    `json:"page_size" p:"page_size" d:"5"`
+	Status   string `json:"status" p:"status"` // 过滤 success/error
 }
 
 // TracesRes 最近 RAG 链路列表响应
@@ -42,7 +42,7 @@ type TracesRes struct {
 // TraceDetailReq Trace 详情请求（P0）
 type TraceDetailReq struct {
 	g.Meta  `path:"/rageval/v1/traces/detail" method:"GET" tags:"RagEval" summary:"Trace链路详情"`
-	TraceID string `json:"trace_id" v:"required#trace_id不能为空"`
+	TraceID string `json:"trace_id" p:"trace_id" v:"required#trace_id不能为空"`
 }
 
 // TraceDetailRes Trace 详情响应（P0）

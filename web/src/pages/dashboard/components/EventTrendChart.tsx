@@ -13,7 +13,7 @@ const TIME_WINDOWS = [
 
 type WindowValue = 7 | 30 | 90
 
-export default function EventTrendChart() {
+export default function EventTrendChart({ refreshKey }: { refreshKey?: number }) {
   const [loading, setLoading] = useState(true)
   const [timeWindow, setTimeWindow] = useState<WindowValue>(30)
   const [dates, setDates] = useState<string[]>([])
@@ -51,7 +51,7 @@ export default function EventTrendChart() {
       }
     }
     fetchData()
-  }, [timeWindow])
+  }, [timeWindow, refreshKey])
 
   // 时间窗口 Tab 条，始终渲染（含 loading 态）
   const tabBar = (

@@ -1,8 +1,11 @@
 import { Bell, Search, User, ChevronDown } from 'lucide-react'
 import { useState } from 'react'
+import { useAuthStore } from '@/stores/authStore'
 
 export default function Header() {
   const [searchValue, setSearchValue] = useState('')
+  const username = useAuthStore((s) => s.username)
+  const role = useAuthStore((s) => s.role)
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur">
@@ -37,7 +40,10 @@ export default function Header() {
             <div className="h-8 w-8 rounded-full bg-indigo-50 flex items-center justify-center">
               <User className="h-4 w-4 text-indigo-600" />
             </div>
-            <span className="hidden sm:inline font-medium text-slate-700">Admin</span>
+            <span className="hidden sm:inline font-medium text-slate-700">{username || 'User'}</span>
+            {role === 'admin' && (
+              <span className="hidden sm:inline text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 rounded px-1.5 py-0.5">管理员</span>
+            )}
             <ChevronDown className="h-4 w-4 text-slate-400" />
           </button>
         </div>

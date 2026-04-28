@@ -161,21 +161,28 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, 
 	}()
 
 	var err error
-	// WithoutCancel 隔离 Agent 执行上下文，使整个 Agent 链路不受 HTTP 客户端断连影响。
-	// 客户端导航/切换对话时浏览器关闭 TCP → GoFrame 取消 request ctx（标准 net/http 行为）→
-	// 若不隔离，Router LLM 节点会立即收到 context.Canceled，整个 intent DAG 提前终止。
-	// agentCtx 保留所有 ctx value（trace、session 等），仅移除取消传播，确保 Agent 完整执行。
-	// SSE write 对已关闭连接会静默失败（GoFrame Flush 不 panic），Backend 资源正常回收。
-	agentCtx := context.WithoutCancel(ctx)
+	// Agent 执行超时
+	// 通过 context.WithTimeout 为整个 Agent 执行链路设置最长运行时间：
+	//   - 标准模式：90s（Router + SubAgent 单轮，含 RAG 检索）
+	//   - 深度思考：300s（Planner 规划 + 多 Worker 串行执行）
+	// 超时后 agentCtx.Done() 触发，LLM 调用中断，SSE 推送 error 事件给前端。
+	timeout := time.Duration(g.Cfg().MustGet(ctx, "limiter.agent_timeout_sec", 90).Int()) * time.Second
+	if req.DeepThinking {
+		timeout = time.Duration(g.Cfg().MustGet(ctx, "limiter.agent_deep_timeout_sec", 300).Int()) * time.Second
+	}
+	agentCtx, agentCancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer agentCancel()
 	if req.WebSearch {
 		agentCtx = context.WithValue(agentCtx, toolsintelligence.WebSearchEnabledKey{}, true)
 	}
 	if req.DeepThinking {
+		// LLM 速率令牌桶
+		// Wait(ctx) 等待令牌，令牌不足时阻塞直到 agentCtx 超时
 		err = chatsvc.ExecuteDeepThink(agentCtx, req.SessionId, req.Query, func(intentType, chunk string) {
 			client.Send(intentType, chunk)
 		})
 	} else {
-		// 标准意图路由：onOutput 回调写入 SSE
+		// LLM 速率令牌桶
 		err = chatsvc.ExecuteIntent(agentCtx, req.SessionId, req.Query, func(intentType, chunk string) {
 			client.Send(intentType, chunk)
 		})
