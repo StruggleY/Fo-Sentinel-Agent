@@ -71,8 +71,9 @@ func NewClient(ctx context.Context) (cli.Client, error) {
 }
 
 func newClientOnce(ctx context.Context) (cli.Client, error) {
+	addr := g.Cfg().MustGet(ctx, "milvus.addr", "localhost:19530").String()
 	// 必须先通过 default DB 创建目标数据库
-	defaultClient, err := cli.NewClient(ctx, cli.Config{Address: "localhost:19530", DBName: "default"})
+	defaultClient, err := cli.NewClient(ctx, cli.Config{Address: addr, DBName: "default"})
 	if err != nil {
 		return nil, fmt.Errorf("连接 Milvus default 库失败: %w", err)
 	}
@@ -95,7 +96,7 @@ func newClientOnce(ctx context.Context) (cli.Client, error) {
 	}
 	defaultClient.Close()
 
-	sentinelClient, err := cli.NewClient(ctx, cli.Config{Address: "localhost:19530", DBName: DBName})
+	sentinelClient, err := cli.NewClient(ctx, cli.Config{Address: addr, DBName: DBName})
 	if err != nil {
 		return nil, fmt.Errorf("连接 Milvus %s 库失败: %w", DBName, err)
 	}

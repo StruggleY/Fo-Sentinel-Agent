@@ -2,6 +2,8 @@ package mysql
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/google/uuid"
@@ -41,6 +43,13 @@ func SeedSettings(ctx context.Context) {
 	for _, d := range defaults {
 		if existing, _ := GetSetting(ctx, d.key); existing == "" {
 			_ = SetSetting(ctx, d.key, d.value)
+		}
+	}
+	// 自动生成 ingest API Key（首次启动时生成，后续不覆盖）
+	if existing, _ := GetSetting(ctx, "ingest.api_key"); existing == "" {
+		b := make([]byte, 24)
+		if _, err := rand.Read(b); err == nil {
+			_ = SetSetting(ctx, "ingest.api_key", "sk-ingest-"+hex.EncodeToString(b))
 		}
 	}
 }

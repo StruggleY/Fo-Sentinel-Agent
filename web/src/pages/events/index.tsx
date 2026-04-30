@@ -360,14 +360,24 @@ export default function Events() {
                           {event.event_type && (
                             <span className={cn(
                               'inline-flex items-center h-5 px-1.5 rounded text-[10px] font-semibold flex-shrink-0',
-                              event.event_type === 'github' && 'bg-slate-800 text-white',
-                              event.event_type === 'rss'    && 'bg-orange-100 text-orange-700',
-                              event.event_type === 'web'    && 'bg-teal-100 text-teal-700',
-                              !['github','rss','web'].includes(event.event_type) && 'bg-gray-100 text-gray-500',
+                              event.event_type === 'github'   && 'bg-slate-800 text-white',
+                              event.event_type === 'rss'      && 'bg-orange-100 text-orange-700',
+                              event.event_type === 'web'      && 'bg-teal-100 text-teal-700',
+                              event.event_type === 'webhook'  && 'bg-violet-100 text-violet-700',
+                              event.event_type === 'cef'      && 'bg-blue-100 text-blue-700',
+                              event.event_type === 'leef'     && 'bg-cyan-100 text-cyan-700',
+                              event.event_type === 'api_push' && 'bg-indigo-100 text-indigo-700',
+                              event.event_type === 'manual'   && 'bg-gray-100 text-gray-500',
+                              !['github','rss','web','webhook','cef','leef','api_push','manual'].includes(event.event_type) && 'bg-gray-100 text-gray-500',
                             )}>
-                              {event.event_type === 'github' ? 'GitHub'
-                               : event.event_type === 'rss'  ? 'RSS'
-                               : event.event_type === 'web'  ? 'Web'
+                              {event.event_type === 'github'   ? 'GitHub'
+                               : event.event_type === 'rss'    ? 'RSS'
+                               : event.event_type === 'web'    ? 'Web'
+                               : event.event_type === 'webhook' ? 'Webhook'
+                               : event.event_type === 'cef'    ? 'CEF'
+                               : event.event_type === 'leef'   ? 'LEEF'
+                               : event.event_type === 'api_push' ? 'API Push'
+                               : event.event_type === 'manual' ? '手动'
                                : event.event_type}
                             </span>
                           )}

@@ -20,7 +20,7 @@
     - [3. 联网威胁情报（Intelligence Agent）](#3-联网威胁情报intelligence-agent)
     - [4. RAG 增强检索管道](#4-rag-增强检索管道)
     - [5. 知识库管理](#5-知识库管理)
-    - [6. 多源情报订阅与自动抓取](#6-多源情报订阅与自动抓取)
+    - [6. 多源情报订阅、自动抓取与告警接入](#6-多源情报订阅自动抓取与告警接入)
     - [7. 全链路可观测性（Trace）](#7-全链路可观测性trace)
     - [8. RAG 质量评估](#8-rag-质量评估)
     - [9. 分层记忆管理](#9-分层记忆管理)
@@ -479,48 +479,57 @@ Web 上传文件
 
 ---
 
-### 6. 多源情报订阅与自动抓取
+### 6. 多源情报订阅、自动抓取与告警接入
 
-安全运营需要持续获取最新威胁情报。系统通过订阅机制自动抓取多源情报，实现情报的自动化采集与入库。
+安全运营需要持续获取最新威胁情报，同时接收外部安全设备（WAF、SIEM、IDS/IPS）产生的实时告警。系统通过订阅机制自动抓取多源情报，并提供标准化的多格式告警接入通道，统一归一化后写入事件库。
 
 #### 主要流程
 
 ```
-Scheduler 定时调度 (goroutine 后台运行)
-        ↓
-    RSS Fetcher / GitHub Fetcher 并行抓取
-    - RSS 订阅源 (厂商安全公告)
-    - GitHub Security Advisories (开源漏洞)
-        ↓
-    内容解析与提取
-    - 标题、描述、链接、发布时间
-    - CVE 编号、影响范围
-        ↓
-    去重检查 (SHA256 内容哈希)
-    - 计算内容指纹
-    - 查询 MySQL 是否已存在
-        ↓
-    MySQL 入库 (status=pending)
-    - 写入 events 表
-    - 记录来源和元数据
-        ↓
+┌─ 被动订阅抓取 ──────────────────────────────────────────────┐
+│  Scheduler 定时调度 (goroutine 后台运行)                     │
+│  RSS Fetcher / GitHub Fetcher 并行抓取                      │
+│  - RSS 订阅源 (厂商安全公告)                                 │
+│  - GitHub Security Advisories (开源漏洞)                    │
+│  内容解析与提取 (标题/描述/CVE/发布时间)                      │
+└─────────────────────────────────────────────────────────────┘
+
+┌─ 主动告警接入 ──────────────────────────────────────────────┐
+│  外部安全设备 / SIEM → X-API-Key 认证                        │
+│  ├─ POST /api/ingest/v1/push    — 标准化 REST（新系统推荐）  │
+│  ├─ POST /api/ingest/v1/webhook — 通用 JSON（Splunk/Elastic）│
+│  ├─ POST /api/ingest/v1/cef     — ArcSight CEF（text/plain）│
+│  └─ POST /api/ingest/v1/leef    — IBM QRadar LEEF           │
+│  格式解析与字段归一化                                        │
+│  - Webhook: 多字段别名 fallback (title/name/alert_name)     │
+│  - CEF: Header + Extension，severity 数字→等级映射          │
+│  - LEEF: Tab 分隔属性，提取 eventID/sev/msg                 │
+└─────────────────────────────────────────────────────────────┘
+
+          ↓ (两路汇聚)
+    去重检查 (SHA256 内容指纹)
+    - 计算 SHA256(title|source|content[:200])[:32]
+    - 重复数据返回 is_new=false，不重复写入
+          ↓
+    MySQL 入库 (event_type 标记渠道来源)
+    - rss / github / webhook / cef / leef / api_push
+    - 保存原始 raw_payload 供审计
+          ↓
     Indexer 批量向量化 (定时触发)
-    - 读取 pending 状态事件
-    - text-embedding-v4 向量化
-    - 更新状态为 indexed
-        ↓
-    Milvus 索引写入 (events 分区)
-    - 写入稠密向量
-    - 写入稀疏向量 (BM25)
-    - 供 RAG 检索使用
+    - text-embedding-v4 向量化 → Milvus (events 分区)
+    - 写入稠密向量 + 稀疏向量 (BM25)，供 RAG 检索
 ```
 
 **核心特性**
 
-- **多协议支持**：RSS 订阅和 GitHub Security Advisories 两种抓取方式，覆盖主流情报来源
-- **自动定时抓取**：后台调度器定时执行，全程无需人工干预
-- **智能去重机制**：基于内容哈希去重，避免重复数据
+- **双路情报汇聚**：被动订阅（RSS/GitHub 定时抓取）与主动接入（外部设备推送）两路并行，覆盖情报来源
+- **四种接入格式**：API Push、Webhook、CEF（ArcSight）、LEEF（IBM QRadar），兼容主流安全设备
+- **独立 API Key 认证**：接入端点使用 `X-API-Key` 请求头，与 JWT 用户认证隔离，支持在管理界面查看和重置
+- **SHA256 内容去重**：统一基于内容指纹去重，避免订阅抓取与主动推送产生重复数据
+- **渠道标签追踪**：事件列表显示来源渠道标签，接入历史面板展示最近 10 条外部接入记录
 - **异步向量化**：新事件入库后批量向量化，不阻塞主流程
+
+---
 
 ### 7. 全链路可观测性（Trace）
 
@@ -812,35 +821,43 @@ npm run dev
 
 ## 部署
 
+### Docker 一键部署（推荐）
+
+无需手动安装任何依赖，一条命令启动全部服务（MySQL、Redis、Milvus、前端、后端）：
+
+```bash
+# 首次部署前生成 vendor 目录
+go mod vendor
+
+cd manifest/docker
+bash docker.sh
+```
+
+启动完成后访问：
+- 前端界面：http://localhost:8001
+- Swagger API：http://localhost:8001/swagger
+- Attu（Milvus 管理）：http://localhost:8000
+
 ### 开发环境
 
 ```bash
-# 启动所有依赖服务
-docker compose -f manifest/docker/docker-compose.yml up -d
+# 仅启动基础设施
+docker compose -f manifest/docker/docker-compose.yml up -d etcd minio standalone redis mysql
 
-# 查看服务状态
-docker compose -f manifest/docker/docker-compose.yml ps
+# 启动后端
+go run main.go
+
+# 启动前端（另开终端）
+cd web && npm run dev
 ```
 
-### 生产环境
+### 生产部署建议
 
-```bash
-# 构建后端
-go build -o fo-sentinel-agent main.go
-
-# 构建前端
-cd web && npm run build
-```
-
-**生产部署建议：**
-
-- 修改默认管理员密码
-- 启用 JWT 认证
-- 配置 HTTPS 反向代理
+- 修改 `config.docker.yaml` 中的默认管理员密码和 JWT Secret
+- 配置 HTTPS 反向代理（Nginx）
 - 配置 Redis 持久化
 - 使用 Milvus 生产集群
 - 监控 LLM API 配额
-- 配置日志收集与告警
 
 ## 许可证
 

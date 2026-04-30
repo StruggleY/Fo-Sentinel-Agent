@@ -102,6 +102,22 @@ services:
       timeout: 5s
       retries: 3
 
+  app:
+    container_name: fo-sentinel-agent-app
+    build:
+      context: ../..
+      dockerfile: manifest/docker/Dockerfile
+    ports:
+      - "8001:8001"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      standalone:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   default:
     name: milvus

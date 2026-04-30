@@ -25,4 +25,14 @@ export const settingsService = {
       auto_mark_read: s.autoMarkRead,
     })
   },
+
+  async getIngestKey(): Promise<string> {
+    const res = await api.get<ApiResponse<{ api_key: string }>>('/settings/v1/ingest_key')
+    return res.data.data?.api_key || ''
+  },
+
+  async resetIngestKey(): Promise<string> {
+    const res = await api.post<ApiResponse<{ api_key: string }>>('/settings/v1/ingest_key/reset', {})
+    return res.data.data?.api_key || ''
+  },
 }

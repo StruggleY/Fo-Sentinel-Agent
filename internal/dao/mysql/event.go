@@ -102,6 +102,23 @@ func DeleteEvent(ctx context.Context, id string) error {
 	return db.Where("id = ?", id).Delete(&Event{}).Error
 }
 
+// GetEventByDedupKey 按去重键查询事件，未找到时返回 (nil, nil)。
+// 用于告警接入时的快速去重判断，避免重复写入相同告警。
+func GetEventByDedupKey(ctx context.Context, dedupKey string) (*Event, error) {
+	db, err := DB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var e Event
+	if err := db.Where("dedup_key = ?", dedupKey).Limit(1).Find(&e).Error; err != nil {
+		return nil, err
+	}
+	if e.ID == "" {
+		return nil, nil
+	}
+	return &e, nil
+}
+
 // FindIntelligenceByCVEID 查询 event_type=web 中是否已存在相同 CVE ID 的记录。
 // 返回 (nil, nil) 表示未找到；返回非 nil Event 表示找到已有记录。
 func FindIntelligenceByCVEID(ctx context.Context, cveID string) (*Event, error) {

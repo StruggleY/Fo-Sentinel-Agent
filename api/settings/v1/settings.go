@@ -27,3 +27,23 @@ type SaveGeneralReq struct {
 
 // SaveGeneralRes 保存响应
 type SaveGeneralRes struct{}
+
+// GetIngestKeyReq 获取告警接入 API Key
+type GetIngestKeyReq struct {
+	g.Meta `path:"/settings/v1/ingest_key" method:"get" summary:"获取告警接入 API Key"`
+}
+
+// GetIngestKeyRes 响应
+type GetIngestKeyRes struct {
+	APIKey string `json:"api_key"`
+}
+
+// ResetIngestKeyReq 重置告警接入 API Key
+type ResetIngestKeyReq struct {
+	g.Meta `path:"/settings/v1/ingest_key/reset" method:"post" summary:"重置告警接入 API Key"`
+}
+
+// ResetIngestKeyRes 响应
+type ResetIngestKeyRes struct {
+	APIKey string `json:"api_key"`
+}

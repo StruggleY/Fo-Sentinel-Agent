@@ -5,8 +5,11 @@ package settings
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 
 	v1 "Fo-Sentinel-Agent/api/settings/v1"
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	settingssvc "Fo-Sentinel-Agent/internal/service/settings"
 )
 
@@ -34,4 +37,26 @@ func (c *ControllerV1) SaveGeneral(ctx context.Context, req *v1.SaveGeneralReq) 
 		return nil, err
 	}
 	return &v1.SaveGeneralRes{}, nil
+}
+
+// GetIngestKey 获取告警接入 API Key。
+func (c *ControllerV1) GetIngestKey(ctx context.Context, _ *v1.GetIngestKeyReq) (*v1.GetIngestKeyRes, error) {
+	key, err := dao.GetSetting(ctx, "ingest.api_key")
+	if err != nil {
+		return nil, err
+	}
+	return &v1.GetIngestKeyRes{APIKey: key}, nil
+}
+
+// ResetIngestKey 重新生成告警接入 API Key。
+func (c *ControllerV1) ResetIngestKey(ctx context.Context, _ *v1.ResetIngestKeyReq) (*v1.ResetIngestKeyRes, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	newKey := "sk-ingest-" + hex.EncodeToString(b)
+	if err := dao.SetSetting(ctx, "ingest.api_key", newKey); err != nil {
+		return nil, err
+	}
+	return &v1.ResetIngestKeyRes{APIKey: newKey}, nil
 }

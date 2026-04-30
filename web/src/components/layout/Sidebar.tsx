@@ -16,6 +16,7 @@ import {
   LibraryBig,
   FlaskConical,
   ChevronDown,
+  Plug,
 } from 'lucide-react'
 import { useAppStore } from '@/stores/app'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -56,6 +57,7 @@ const navGroups: NavGroup[] = [
     items: [
       { path: '/subscriptions', icon: Rss, label: '情报订阅' },
       { path: '/events', icon: ShieldAlert, label: '安全事件', exact: true },
+      { path: '/ingest', icon: Plug, label: '告警接入' },
       { path: '/reports', icon: FileText, label: '分析报告' },
       { path: '/term-mapping', icon: BookMarked, label: '术语映射' },
     ],

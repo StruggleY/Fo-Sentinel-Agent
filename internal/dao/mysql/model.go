@@ -8,21 +8,22 @@ import (
 
 // Event 安全事件（Content 仅在内存中流转，不落 MySQL，向量化后存 Milvus）
 type Event struct {
-	ID        string         `gorm:"column:id;primaryKey;size:64"`
-	Title     string         `gorm:"column:title;size:256;not null"`
-	Content   string         `gorm:"-"`                                       // 仅内存，不写库；入库前传给 IndexDocumentsAsync
-	EventType string         `gorm:"column:event_type;size:32;index"`         // rss / github / web / manual
-	DedupKey  string         `gorm:"column:dedup_key;size:64;index"`          // SHA256(title|source|content[:500])，用于去重
-	Severity  string         `gorm:"column:severity;size:32;index"`           // critical / high / medium / low
-	Source    string         `gorm:"column:source;size:128;index"`            // 订阅源名称 或 web_search
-	Status    string         `gorm:"column:status;size:32;default:new;index"` // new / processing / resolved / ignored
-	CVEID     string         `gorm:"column:cve_id;size:64;index"`             // CVE-YYYY-NNNNN，web 类情报去重更新依据
-	RiskScore float64        `gorm:"column:risk_score"`                       // 0-10，由 severity 映射，0 表示未评估
-	Metadata  string         `gorm:"column:metadata;type:json"`               // 扩展字段，如 {"link":"...","pub_date":"..."}
-	IndexedAt *time.Time     `gorm:"column:indexed_at;type:datetime"`         // nil = 未向量化，非 nil = 已写入 Milvus
-	CreatedAt time.Time      `gorm:"column:created_at;type:datetime;autoCreateTime"`
-	UpdatedAt time.Time      `gorm:"column:updated_at;type:datetime;autoUpdateTime"`
-	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index"`
+	ID         string         `gorm:"column:id;primaryKey;size:64"`
+	Title      string         `gorm:"column:title;size:256;not null"`
+	Content    string         `gorm:"-"`                                       // 仅内存，不写库；入库前传给 IndexDocumentsAsync
+	EventType  string         `gorm:"column:event_type;size:32;index"`         // rss / github / web / manual
+	DedupKey   string         `gorm:"column:dedup_key;size:64;index"`          // SHA256(title|source|content[:500])，用于去重
+	Severity   string         `gorm:"column:severity;size:32;index"`           // critical / high / medium / low
+	Source     string         `gorm:"column:source;size:128;index"`            // 订阅源名称 或 web_search
+	Status     string         `gorm:"column:status;size:32;default:new;index"` // new / processing / resolved / ignored
+	CVEID      string         `gorm:"column:cve_id;size:64;index"`             // CVE-YYYY-NNNNN，web 类情报去重更新依据
+	RiskScore  float64        `gorm:"column:risk_score"`                       // 0-10，由 severity 映射，0 表示未评估
+	Metadata   string         `gorm:"column:metadata;type:json"`               // 扩展字段，如 {"link":"...","pub_date":"..."}
+	RawPayload string         `gorm:"column:raw_payload;type:text"`            // 原始告警 payload（webhook/CEF/LEEF 原文）
+	IndexedAt  *time.Time     `gorm:"column:indexed_at;type:datetime"`         // nil = 未向量化，非 nil = 已写入 Milvus
+	CreatedAt  time.Time      `gorm:"column:created_at;type:datetime;autoCreateTime"`
+	UpdatedAt  time.Time      `gorm:"column:updated_at;type:datetime;autoUpdateTime"`
+	DeletedAt  gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
 
 func (Event) TableName() string { return "events" }

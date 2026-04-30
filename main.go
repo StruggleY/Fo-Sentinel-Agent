@@ -9,6 +9,7 @@ import (
 	"Fo-Sentinel-Agent/internal/controller/auth"
 	"Fo-Sentinel-Agent/internal/controller/chat"
 	"Fo-Sentinel-Agent/internal/controller/event"
+	ingestctrl "Fo-Sentinel-Agent/internal/controller/ingest"
 	knowledgectrl "Fo-Sentinel-Agent/internal/controller/knowledge"
 	ragevalctrl "Fo-Sentinel-Agent/internal/controller/rageval"
 	"Fo-Sentinel-Agent/internal/controller/report"
@@ -68,6 +69,12 @@ func main() {
 
 	// ========== 阶段3：HTTP服务器配置 ==========
 	s := g.Server()
+	// 托管前端静态文件（生产构建产物）
+	s.SetServerRoot("web/dist")
+	// SPA fallback：未匹配到静态文件或 /api 路由时返回 index.html
+	s.BindHandler("/*", func(r *ghttp.Request) {
+		r.Response.ServeFile("web/dist/index.html")
+	})
 	s.Group("/api", func(group *ghttp.RouterGroup) {
 		// 中间件链：CORS → 响应格式化 → JWT认证 → 限流（限流依赖 JWT 解析的 user_id）
 		group.Middleware(middleware.CORSMiddleware)
@@ -86,6 +93,13 @@ func main() {
 		group.Bind(tracectrl.NewV1())
 		group.Bind(knowledgectrl.NewV1())
 		group.Bind(ragevalctrl.NewV1())
+	})
+	// 告警接入路由：使用 API Key 认证（外部设备无法携带 JWT）
+	s.Group("/api", func(group *ghttp.RouterGroup) {
+		group.Middleware(middleware.CORSMiddleware)
+		group.Middleware(middleware.ResponseMiddleware)
+		group.Middleware(middleware.IngestAPIKeyMiddleware())
+		group.Bind(ingestctrl.NewV1())
 	})
 
 	// ========== 阶段4：后台任务启动 ==========
