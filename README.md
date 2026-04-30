@@ -496,7 +496,7 @@ Web 上传文件
 
 ┌─ 主动告警接入 ──────────────────────────────────────────────┐
 │  外部安全设备 / SIEM → X-API-Key 认证                        │
-│  ├─ POST /api/ingest/v1/push    — 标准化 REST（新系统推荐）  │
+│  ├─ POST /api/ingest/v1/push    — 标准化 REST（系统推荐）    │
 │  ├─ POST /api/ingest/v1/webhook — 通用 JSON（Splunk/Elastic）│
 │  ├─ POST /api/ingest/v1/cef     — ArcSight CEF（text/plain）│
 │  └─ POST /api/ingest/v1/leef    — IBM QRadar LEEF           │
