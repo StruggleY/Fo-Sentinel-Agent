@@ -3,7 +3,7 @@
 package main
 
 import (
-	"Fo-Sentinel-Agent/internal/ai/ops/engine
+	"Fo-Sentinel-Agent/internal/ai/ops/engine"
 	"Fo-Sentinel-Agent/internal/ai/retrieval"
 	"Fo-Sentinel-Agent/internal/ai/rule"
 	toolsops "Fo-Sentinel-Agent/internal/ai/tools/ops"
@@ -13,18 +13,16 @@ import (
 	"Fo-Sentinel-Agent/internal/controller/event"
 	ingestctrl "Fo-Sentinel-Agent/internal/controller/ingest"
 	knowledgectrl "Fo-Sentinel-Agent/internal/controller/knowledge"
-
 	opsctrl "Fo-Sentinel-Agent/internal/controller/ops"
-	ragev
 	ragevalctrl "Fo-Sentinel-Agent/internal/controller/rageval"
+	"Fo-Sentinel-Agent/internal/controller/report"
 	settingsctrl "Fo-Sentinel-Agent/internal/controller/settings"
-	opsctrl "Fo-Sentinel-Agent/internal/controller/ops"
 	"Fo-Sentinel-Agent/internal/controller/subscription"
 	termmapping "Fo-Sentinel-Agent/internal/controller/term_mapping"
 	tracectrl "Fo-Sentinel-Agent/internal/controller/trace"
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
+	"Fo-Sentinel-Agent/internal/service/knowledge"
 	"Fo-Sentinel-Agent/internal/service/scheduler"
-	"Fo-Sentinel-Agent/internal/ai/ops/engine"
 	authPkg "Fo-Sentinel-Agent/utility/auth"
 	"Fo-Sentinel-Agent/utility/middleware"
 

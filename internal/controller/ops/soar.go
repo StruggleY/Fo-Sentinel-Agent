@@ -6,7 +6,7 @@ import (
 
 	soarv1 "Fo-Sentinel-Agent/api/ops/v1"
 	"Fo-Sentinel-Agent/internal/ai/ops/engine"
-
+	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 )
