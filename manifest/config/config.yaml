@@ -52,6 +52,9 @@ doubao_embedding_model:
 # 内部文档知识库根目录（query_internal_docs 工具扫描此路径）
 file_dir: "docs"
 
+milvus:
+  addr: "localhost:19530"
+
 redis:
   addr: "localhost:16379"
   password: ""
@@ -169,3 +172,28 @@ knowledge:
   parent_chunk_size: 1024                   # 父块大小（rune 数，hierarchical 策略）
   child_chunk_size: 256                     # 子块大小（rune 数）
   child_overlap_size: 40                    # 子块重叠窗口（rune 数）
+
+# SOAR 集成配置
+soar:
+  integrations:
+    dingtalk:
+      webhook_url: ""       # 钉钉机器人 Webhook URL
+    wecom:
+      webhook_url: ""       # 企微机器人 Webhook URL
+    email:
+      smtp_host: ""         # SMTP 服务器地址
+      smtp_port: ""                 # SMTP 端口
+      smtp_user: ""    # 发件人邮箱
+      smtp_pass: ""    # QQ邮箱授权码
+
+  # AI 运维配置：控制 AI 规划时可使用的动作和通知渠道
+  ai_ops:
+    # 通知渠道偏好（AI 规划时优先使用已配置的渠道）
+    # 可选值：dingtalk / wecom / email / none
+    notify_channel: ""
+    # 通知收件人（email 渠道时使用）
+    notify_email_to: ""
+    # 是否允许 AI 封禁 IP（高危场景）
+    allow_block_ip: true
+    # 是否允许 AI 调用深度分析（消耗较多 token）
+    allow_ai_analyze: true

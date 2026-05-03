@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import { normalizeMarkdown, cn } from '@/utils'
 import { chatService, ChatSession } from '@/services'
 import { ragevalService } from '@/services/rageval'
+import { opsService } from '@/services/ops'
 import { useContextStore } from '@/stores/contextStore'
 import SessionList from './components/SessionList'
 import WelcomeScreen from './components/WelcomeScreen'
@@ -569,6 +570,7 @@ export default function Chat() {
                     onCancelEdit={handleCancelEdit}
                     onSaveEdit={handleSaveEdit}
                     onEditingContentChange={setEditingContent}
+                    currentEventId={currentEventId}
                   />
                 ))}
                 <div ref={messagesEndRef} />
@@ -616,10 +618,12 @@ interface MessageBubbleProps {
   onCancelEdit: () => void
   onSaveEdit: (index: number) => void
   onEditingContentChange: (content: string) => void
+  currentEventId: string | null
 }
 
-function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing, editingContent, onStartEdit, onCancelEdit, onSaveEdit, onEditingContentChange }: MessageBubbleProps) {
+function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing, editingContent, onStartEdit, onCancelEdit, onSaveEdit, onEditingContentChange, currentEventId }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false)
+  const [showPlaybookPicker, setShowPlaybookPicker] = useState(false)
   const editTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   const adjustEditHeight = useCallback(() => {
@@ -833,6 +837,19 @@ function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing,
                     <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1F2937]" />
                   </div>
                 </div>
+                {currentEventId && (
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowPlaybookPicker(!showPlaybookPicker)}
+                      className="flex items-center gap-1 px-2 py-1 rounded-full text-xs text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors"
+                    >
+                      <Zap className="w-3 h-3" /> 执行响应
+                    </button>
+                    {showPlaybookPicker && (
+                      <PlaybookPicker eventId={currentEventId} onClose={() => setShowPlaybookPicker(false)} />
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1257,6 +1274,50 @@ function ThinkingBlock({ thinking, isThinking, isDone, thinkDuration }: Thinking
           <div className="think-markdown text-xs text-[#0369A1] leading-relaxed">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{thinking}</ReactMarkdown>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── PlaybookPicker ─────────────────────────────────────────────────────────────
+
+function PlaybookPicker({ eventId, onClose }: { eventId: string; onClose: () => void }) {
+  const [playbooks, setPlaybooks] = useState<{ id: string; name: string }[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    opsService.listPlaybooks()
+      .then(list => setPlaybooks(list.filter(p => p.enabled)))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleSelect = async (playbookId: string) => {
+    onClose()
+    try {
+      await opsService.testPlaybook(playbookId, eventId)
+    } catch { /* 静默失败 */ }
+  }
+
+  return (
+    <div className="absolute bottom-full left-0 mb-2 w-52 bg-white rounded-xl border border-slate-200 shadow-lg z-50 overflow-hidden">
+      <div className="px-3 py-2 border-b border-slate-100 text-xs font-medium text-gray-500">选择响应策略</div>
+      {loading ? (
+        <div className="px-3 py-3 text-xs text-gray-400">加载中...</div>
+      ) : playbooks.length === 0 ? (
+        <div className="px-3 py-3 text-xs text-gray-400">暂无可用策略</div>
+      ) : (
+        <div className="max-h-48 overflow-y-auto">
+          {playbooks.map(pb => (
+            <button
+              key={pb.id}
+              onClick={() => handleSelect(pb.id)}
+              className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
+            >
+              {pb.name}
+            </button>
+          ))}
         </div>
       )}
     </div>

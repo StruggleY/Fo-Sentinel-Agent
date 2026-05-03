@@ -3,23 +3,28 @@
 package main
 
 import (
+	"Fo-Sentinel-Agent/internal/ai/ops/engine
 	"Fo-Sentinel-Agent/internal/ai/retrieval"
 	"Fo-Sentinel-Agent/internal/ai/rule"
+	toolsops "Fo-Sentinel-Agent/internal/ai/tools/ops"
 	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 	"Fo-Sentinel-Agent/internal/controller/auth"
 	"Fo-Sentinel-Agent/internal/controller/chat"
 	"Fo-Sentinel-Agent/internal/controller/event"
 	ingestctrl "Fo-Sentinel-Agent/internal/controller/ingest"
 	knowledgectrl "Fo-Sentinel-Agent/internal/controller/knowledge"
+
+	opsctrl "Fo-Sentinel-Agent/internal/controller/ops"
+	ragev
 	ragevalctrl "Fo-Sentinel-Agent/internal/controller/rageval"
-	"Fo-Sentinel-Agent/internal/controller/report"
 	settingsctrl "Fo-Sentinel-Agent/internal/controller/settings"
+	opsctrl "Fo-Sentinel-Agent/internal/controller/ops"
 	"Fo-Sentinel-Agent/internal/controller/subscription"
 	termmapping "Fo-Sentinel-Agent/internal/controller/term_mapping"
 	tracectrl "Fo-Sentinel-Agent/internal/controller/trace"
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
-	"Fo-Sentinel-Agent/internal/service/knowledge"
 	"Fo-Sentinel-Agent/internal/service/scheduler"
+	"Fo-Sentinel-Agent/internal/ai/ops/engine"
 	authPkg "Fo-Sentinel-Agent/utility/auth"
 	"Fo-Sentinel-Agent/utility/middleware"
 
@@ -93,6 +98,7 @@ func main() {
 		group.Bind(tracectrl.NewV1())
 		group.Bind(knowledgectrl.NewV1())
 		group.Bind(ragevalctrl.NewV1())
+		group.Bind(opsctrl.NewV1())
 	})
 	// 告警接入路由：使用 API Key 认证（外部设备无法携带 JWT）
 	s.Group("/api", func(group *ghttp.RouterGroup) {
@@ -103,6 +109,12 @@ func main() {
 	})
 
 	// ========== 阶段4：后台任务启动 ==========
+	// 注入 AI 运维 ChatOps 触发函数
+	toolsops.SetTriggerFunc(engine.TriggerForEvent)
+
+	// 启动 AI 运维补偿扫描：定时扫描历史高危/严重事件，对未触发过运维的事件补发触发
+	scheduler.RunOpsCompensationScan(ctx)
+
 	// 启动知识库文档异步索引 Worker Pool
 	knowledge.StartWorkerPool(ctx)
 

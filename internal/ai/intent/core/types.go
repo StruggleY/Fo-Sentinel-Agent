@@ -26,6 +26,7 @@ const (
 	IntentRisk   IntentType = "risk"   // 风险评估、威胁分析、漏洞评估、安全评分、CVE 分析
 	IntentSolve  IntentType = "solve"  // 单条安全事件应急响应方案生成（聚焦处置步骤与修复措施）
 	IntentIntel  IntentType = "intel"  // 联网威胁情报检索：CVE 详情、漏洞公告、威胁组织、恶意 IP/域名
+	IntentOps    IntentType = "ops"    // AI 智能运维：触发指定事件的自动化响应（封禁/通知/状态更新）
 
 	// ── 深度思考模式专用 ──────────────────────────────────────────────────────
 	IntentPlan     IntentType = "plan"      // Plan Agent 最终答案（展示在主内容气泡）

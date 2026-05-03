@@ -18,7 +18,6 @@ import {
   Tag,
   CalendarDays,
   TrendingUp,
-  Download,
   Banknote,
 } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
@@ -645,14 +644,6 @@ export default function Traces() {
       setSelected(new Set())
       loadRuns(); loadStats()
     } catch { toast.error('删除失败') }
-  }
-
-  const handleExportSnapshot = async () => {
-    if (!sessionFilter) return
-    try {
-      await traceService.exportSessionSnapshot(sessionFilter)
-      toast.success('对话快照导出成功')
-    } catch { toast.error('导出失败') }
   }
 
   const handleDelete = async (traceId: string) => {

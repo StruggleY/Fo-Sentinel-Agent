@@ -39,16 +39,20 @@ func Init(ctx context.Context) error {
 			initErr = fmt.Errorf("open mysql: %w", err)
 			return
 		}
-		if err = db.WithContext(ctx).AutoMigrate(&Event{}, &Subscription{}, &Report{}, &User{}, &Setting{}, &QueryTermMapping{}, &TraceRun{}, &TraceNode{}, &KnowledgeBase{}, &KnowledgeDocument{}, &KnowledgeChunk{}, &MessageFeedback{}); err != nil {
+		if err = db.WithContext(ctx).AutoMigrate(
+			&Event{}, &Subscription{}, &Report{}, &User{}, &Setting{}, &QueryTermMapping{},
+			&TraceRun{}, &TraceNode{}, &KnowledgeBase{}, &KnowledgeDocument{}, &KnowledgeChunk{},
+			&MessageFeedback{}, &OpsRun{}, &OpsRunStep{}, &OpsProtectedAsset{},
+		); err != nil {
 			initErr = fmt.Errorf("auto migrate: %w", err)
 			return
 		}
 		// 连接池：MaxOpen 限制并发数防打爆 server，MaxIdle 复用减少握手开销，MaxLifetime 防服务端超时强断
 		if sqlDB, e := db.DB(); e == nil {
-			sqlDB.SetMaxOpenConns(100)                 // 20 → 100（支持更高并发）
-			sqlDB.SetMaxIdleConns(20)                  // 5 → 20（减少连接建立开销）
-			sqlDB.SetConnMaxLifetime(time.Hour)        // 连接最大存活时间
-			sqlDB.SetConnMaxIdleTime(10 * time.Minute) // 空闲连接10分钟后回收
+			sqlDB.SetMaxOpenConns(100)
+			sqlDB.SetMaxIdleConns(20)
+			sqlDB.SetConnMaxLifetime(time.Hour)
+			sqlDB.SetConnMaxIdleTime(10 * time.Minute)
 		}
 		globalDB = db
 	})

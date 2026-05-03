@@ -9,7 +9,7 @@
  * 支持的事件类型：
  *   - meta      会话元数据（sessionId、timestamp），在流开始时推送一次
  *   - status    处理状态通知（路由、Agent 切换）
- *   - chat/event/report/risk/solve  各 Agent 的内容流
+ *   - chat/event/report/risk/solve/intel/ops  各 Agent 的内容流
  *   - error     错误通知
  *   - done      流结束
  *

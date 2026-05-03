@@ -13,6 +13,7 @@ import TraceDetail from './pages/traces/detail'
 import Knowledge from './pages/knowledge'
 import RagEval from './pages/rag-eval'
 import Ingest from './pages/ingest'
+import Ops from './pages/ops'
 import Login from './pages/login'
 import { useAuthStore } from './stores/authStore'
 
@@ -44,6 +45,7 @@ function App() {
           <Route path="knowledge/:baseId/docs/:docId/chunks" element={<Navigate to="/knowledge?tab=bases" replace />} />
           <Route path="rag-eval" element={<RagEval />} />
           <Route path="ingest" element={<Ingest />} />
+          <Route path="ops" element={<Ops />} />
           {/* /cost-monitor 重定向到 /traces?tab=overview */}
           <Route path="cost-monitor" element={<Navigate to="/traces?tab=overview" replace />} />
         </Route>

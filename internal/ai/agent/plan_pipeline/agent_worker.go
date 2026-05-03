@@ -17,6 +17,7 @@ import (
 	"Fo-Sentinel-Agent/internal/ai/agent/base"
 	"Fo-Sentinel-Agent/internal/ai/agent/event_analysis_pipeline"
 	"Fo-Sentinel-Agent/internal/ai/agent/intelligence_pipeline"
+	"Fo-Sentinel-Agent/internal/ai/agent/ops_pipeline"
 	"Fo-Sentinel-Agent/internal/ai/agent/report_pipeline"
 	"Fo-Sentinel-Agent/internal/ai/agent/risk_pipeline"
 	"Fo-Sentinel-Agent/internal/ai/agent/solve_pipeline"
@@ -300,7 +301,32 @@ func NewSolveWorker() tool.InvokableTool {
 	return t
 }
 
-// NewIntelligenceWorker 创建威胁情报 Worker 工具。
+// NewOpsWorker 创建智能运维 Worker 工具。
+// 封装 ops_pipeline（事件分析 + 运维响应：封禁/通知/状态更新）。
+func NewOpsWorker() tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"ops_agent",
+		"Call the Ops Agent to trigger automated incident response for a specific security event. Handles: IP blocking, multi-channel alert notifications (DingTalk/WeCom/Email), event status updates. Requires event_id in the query. Returns execution result.",
+		func(ctx context.Context, input *WorkerInput, _ ...tool.Option) (string, error) {
+			contextPrefix := buildWorkerContext(ctx)
+			enrichedQuery := contextPrefix + "当前任务：" + input.Query
+
+			spanCtx, spanID := aitrace.StartSpan(isolateCtx(ctx), aitrace.NodeTypeAgent, "OpsAgent")
+			result, err := ops_pipeline.RunWithQuery(spanCtx, enrichedQuery)
+			aitrace.FinishSpan(spanCtx, spanID, err, nil)
+			if err != nil {
+				return "", fmt.Errorf("ops agent: %w", err)
+			}
+			return truncateWorkerOutput(result), nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+// 封装 intelligence_pipeline（含 RAG + ReAct + web_search / save_intelligence）
 // 封装 intelligence_pipeline（含 RAG + ReAct + web_search / save_intelligence）。
 // 适用于 Plan Agent 规划步骤中需要"联网搜索最新情报"的场景。
 func NewIntelligenceWorker() tool.InvokableTool {

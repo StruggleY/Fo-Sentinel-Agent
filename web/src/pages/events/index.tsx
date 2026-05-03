@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Search,
   ExternalLink,
@@ -13,6 +14,7 @@ import {
   Clock,
   Inbox,
   Pencil,
+  Zap,
 } from 'lucide-react'
 import { cn, formatDate } from '@/utils'
 import Pagination from '@/components/common/Pagination'
@@ -23,6 +25,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import EventDetailModal from './components/EventDetailModal'
 import type { SecurityEvent } from '@/types'
 import { eventService } from '@/services/event'
+import { opsService } from '@/services/ops'
 import toast from 'react-hot-toast'
 import CustomSelect, { type SelectOption } from '@/components/common/CustomSelect'
 
@@ -51,6 +54,7 @@ interface EventStats {
 }
 
 export default function Events() {
+  const navigate = useNavigate()
   const autoMarkRead = useSettingsStore(s => s.autoMarkRead)
   const [searchQuery, setSearchQuery] = useState('')
   const [severityFilter, setSeverityFilter] = useState('all')
@@ -176,8 +180,16 @@ export default function Events() {
   const pageAllSelected = events.length > 0 && events.every(e => selected.has(e.id))
   const pagePartialSelected = !pageAllSelected && events.some(e => selected.has(e.id))
 
-  const handleStatusChange = async (id: string, status: string) => {
+  const handleAutoResponse = async (event: SecurityEvent) => {
     try {
+      await opsService.directRun(event.id)
+      navigate(`/ops`)
+    } catch {
+      toast.error('触发失败')
+    }
+  }
+
+  const handleStatusChange = async (id: string, status: string) => {    try {
       await eventService.updateStatus(id, status)
       setEvents(prev => prev.map(e => e.id === id ? { ...e, status: status as SecurityEvent['status'] } : e))
     } catch {
@@ -435,6 +447,13 @@ export default function Events() {
 
                       <td className="py-3.5 pl-2 pr-4" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleAutoResponse(event)}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-violet-200 bg-violet-50 text-violet-600 hover:bg-violet-100 transition-all"
+                            title="一键AI运维"
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => {
                               setSelectedEvent(event)

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"Fo-Sentinel-Agent/internal/ai/ops/engine"
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
 	"Fo-Sentinel-Agent/internal/service/pipeline"
 
@@ -78,6 +79,9 @@ func Ingest(ctx context.Context, alert *NormalizedAlert) (id string, isNew bool,
 
 	// 异步向量索引
 	pipeline.IndexDocumentsAsync(ctx, []dao.Event{*e})
+
+	// 异步触发 SOAR Playbook 匹配
+	go engine.TriggerForEvent(context.Background(), e)
 
 	g.Log().Infof(ctx, "[ingest] 新告警入库 | id=%s | source=%s | severity=%s | title=%s",
 		e.ID, e.Source, e.Severity, e.Title)

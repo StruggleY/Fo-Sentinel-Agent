@@ -13,6 +13,7 @@ package tools
 import (
 	toolsevent "Fo-Sentinel-Agent/internal/ai/tools/event"
 	toolsintelligence "Fo-Sentinel-Agent/internal/ai/tools/intelligence"
+	toolsops "Fo-Sentinel-Agent/internal/ai/tools/ops"
 	toolsreport "Fo-Sentinel-Agent/internal/ai/tools/report"
 	toolssystem "Fo-Sentinel-Agent/internal/ai/tools/system"
 )
@@ -50,4 +51,13 @@ func init() {
 	Register("web_search", toolsintelligence.NewWebSearchTool())
 	// save_intelligence: 将分析结果持久化到 MySQL events 表，触发异步 Milvus 向量索引
 	Register("save_intelligence", toolsintelligence.NewSaveIntelligenceTool())
+
+	// ── AI 运维 ChatOps 工具 ─────────────────────────────────────────────
+	Register("trigger_ops", toolsops.NewTriggerOpsTool())
+	// AI 运维 Agent 专用工具（通知/封禁/状态更新）
+	Register("notify_dingtalk", toolsops.NewNotifyDingTalkTool())
+	Register("notify_wecom", toolsops.NewNotifyWeComTool())
+	Register("notify_email", toolsops.NewNotifyEmailTool())
+	Register("block_ip", toolsops.NewBlockIPTool())
+	Register("update_event_status", toolsops.NewUpdateEventStatusTool())
 }

@@ -229,3 +229,55 @@ type MessageFeedback struct {
 }
 
 func (MessageFeedback) TableName() string { return "message_feedbacks" }
+
+// ========== AI 智能运维模块 ==========
+
+// OpsRun 运维任务执行记录
+type OpsRun struct {
+	ID         string     `gorm:"column:id;primaryKey;size:64"`
+	PlaybookID string     `gorm:"column:playbook_id;size:64;not null;index"`
+	EventID    string     `gorm:"column:event_id;size:64;index"`
+	Status     string     `gorm:"column:status;size:32;default:running;index"`
+	ErrorMsg   string     `gorm:"column:error_msg;type:text"`
+	StartedAt  time.Time  `gorm:"column:started_at;type:datetime(3)"`
+	FinishedAt *time.Time `gorm:"column:finished_at;type:datetime(3)"`
+	DurationMs int64      `gorm:"column:duration_ms;default:0"`
+	CreatedAt  time.Time  `gorm:"column:created_at;autoCreateTime"`
+	// 非数据库字段
+	PlanSummary   string `gorm:"-" json:"plan_summary,omitempty"`
+	EventTitle    string `gorm:"-" json:"-"`
+	EventSeverity string `gorm:"-" json:"-"`
+}
+
+func (OpsRun) TableName() string { return "ops_runs" }
+
+// OpsRunStep 步骤执行明细
+type OpsRunStep struct {
+	ID             string     `gorm:"column:id;primaryKey;size:64"`
+	RunID          string     `gorm:"column:run_id;size:64;not null;index"`
+	StepID         string     `gorm:"column:step_id;size:64;not null"`
+	StepOrder      int        `gorm:"column:step_order;not null"`
+	ActionType     string     `gorm:"column:action_type;size:64"`
+	ResolvedParams string     `gorm:"column:resolved_params;type:json"`
+	Status         string     `gorm:"column:status;size:32;default:running"`
+	Output         string     `gorm:"column:output;type:text"`
+	ErrorMsg       string     `gorm:"column:error_msg;type:text"`
+	RetryCount     int        `gorm:"column:retry_count;default:0"`
+	StartedAt      time.Time  `gorm:"column:started_at;type:datetime(3)"`
+	FinishedAt     *time.Time `gorm:"column:finished_at;type:datetime(3)"`
+	DurationMs     int64      `gorm:"column:duration_ms;default:0"`
+	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (OpsRunStep) TableName() string { return "ops_run_steps" }
+
+// OpsProtectedAsset 受保护资产（禁止被自动封禁/操作）
+type OpsProtectedAsset struct {
+	ID        uint      `gorm:"primaryKey;autoIncrement"`
+	AssetType string    `gorm:"column:asset_type;size:32;not null"` // ip / domain / host
+	Value     string    `gorm:"column:value;size:256;not null;uniqueIndex"`
+	Reason    string    `gorm:"column:reason;size:500"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (OpsProtectedAsset) TableName() string { return "ops_protected_assets" }

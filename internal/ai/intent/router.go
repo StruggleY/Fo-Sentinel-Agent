@@ -129,6 +129,8 @@ func parseIntentWithConfidence(ctx context.Context, content string) (IntentType,
 		intentType = IntentSolve
 	case "intel":
 		intentType = IntentIntel
+	case "ops":
+		intentType = IntentOps
 	default:
 		// "chat" 或任何未知值均降级为 IntentChat（安全兜底）
 		intentType = IntentChat

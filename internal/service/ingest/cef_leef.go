@@ -65,8 +65,6 @@ func ParseCEF(line string, sourceName string) (*NormalizedAlert, error) {
 // parseCEFExtension 解析 CEF 扩展字段字符串为 map。
 func parseCEFExtension(ext string) map[string]string {
 	result := map[string]string{}
-	// CEF 扩展：key=value 对，value 可含空格，下一个 key= 为分隔符
-	// 简单实现：按空格分割，遇到 key= 模式时切换
 	tokens := strings.Fields(ext)
 	var curKey, curVal string
 	for _, tok := range tokens {
@@ -143,7 +141,6 @@ func ParseLEEF(line string, sourceName string) (*NormalizedAlert, error) {
 
 func parseLEEFAttrs(s string) map[string]string {
 	result := map[string]string{}
-	// LEEF 1.0 用 tab，LEEF 2.0 可自定义分隔符，这里兼容 tab 和空格
 	sep := "\t"
 	if !strings.Contains(s, "\t") {
 		sep = " "

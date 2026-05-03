@@ -49,6 +49,7 @@ const navGroups: NavGroup[] = [
       { path: '/chat', icon: MessageSquare, label: 'RAG 智能对话' },
       { path: '/events/analysis', icon: Cpu, label: 'Agent 分析' },
       { path: '/knowledge', icon: LibraryBig, label: 'AI 知识库' },
+      { path: '/ops', icon: Cpu, label: 'AI 智能运维' },
     ],
   },
   {

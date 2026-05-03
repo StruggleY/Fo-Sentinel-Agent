@@ -78,7 +78,7 @@ export default function Login() {
           </h2>
 
           <p className="text-slate-400 text-base leading-relaxed max-w-xs">
-            8 个专业 AI Agent 协同分析，自动完成安全事件研判、风险评估与报告生成。
+            9 个专业 AI Agent 协同分析，自动完成安全事件研判、风险评估与报告生成。
           </p>
 
           {/* 特性列表 */}

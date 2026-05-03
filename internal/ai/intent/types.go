@@ -31,5 +31,6 @@ const (
 	IntentRisk   = core.IntentRisk
 	IntentSolve  = core.IntentSolve
 	IntentIntel  = core.IntentIntel
+	IntentOps    = core.IntentOps
 	IntentStatus = core.IntentStatus
 )

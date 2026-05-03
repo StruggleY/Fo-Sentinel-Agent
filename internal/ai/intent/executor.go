@@ -133,6 +133,8 @@ func resolveAgentName(intentType IntentType) string {
 		return "SolveAgent"
 	case IntentIntel:
 		return "IntelligenceAgent"
+	case IntentOps:
+		return "OpsAgent"
 	default:
 		return "Agent(" + string(intentType) + ")"
 	}

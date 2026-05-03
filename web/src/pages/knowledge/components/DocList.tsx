@@ -100,7 +100,7 @@ export default function DocList({ baseID }: Props) {
 
   const handleRebuild = async (id: string) => {
     try {
-      await knowledgeService.rebuildDoc(id)
+      await knowledgeService.rebuildDoc(id, '')
       toast.success('已重新提交索引')
       fetchDocs()
     } catch {

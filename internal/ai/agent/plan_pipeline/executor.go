@@ -22,6 +22,7 @@ import (
 //   - risk_assessment_agent：风险评估 Worker（含 RAG pipeline）
 //   - solve_agent：应急响应 Worker（含 RAG pipeline）
 //   - intelligence_agent：威胁情报 Worker（联网搜索 + 情报沉淀）
+//   - ops_agent：智能运维 Worker（封禁/通知/状态更新）
 //   - query_internal_docs：内部知识库文档检索（跨域基础工具）
 //   - get_current_time：实时时间戳（时间范围查询辅助）
 //
@@ -43,6 +44,7 @@ func NewExecutor(ctx context.Context) (adk.Agent, error) {
 	toolList = append(toolList, NewRiskAssessmentWorker()) // 风险评估 Worker
 	toolList = append(toolList, NewSolveWorker())          // 应急响应 Worker
 	toolList = append(toolList, NewIntelligenceWorker())   // 威胁情报 Worker（联网搜索 + 更新入库）
+	toolList = append(toolList, NewOpsWorker())            // 智能运维 Worker（封禁/通知/状态更新）
 
 	execModel, err := models.OpenAIForDeepSeekV3Quick(ctx)
 	if err != nil {

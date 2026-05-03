@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -64,6 +65,26 @@ func UpdateEventStatus(ctx context.Context, id, status string) error {
 		return err
 	}
 	return db.Model(&Event{}).Where("id = ?", id).Update("status", status).Error
+}
+
+// UpdateEventDescription 将 AI 分析结论写入事件 Metadata 的 ai_analysis 字段。
+func UpdateEventDescription(ctx context.Context, id, description string) error {
+	db, err := DB(ctx)
+	if err != nil {
+		return err
+	}
+	// 读取现有 Metadata，合并写入 ai_analysis
+	var e Event
+	if err := db.Select("metadata").First(&e, "id = ?", id).Error; err != nil {
+		return err
+	}
+	meta := map[string]interface{}{}
+	if e.Metadata != "" {
+		_ = json.Unmarshal([]byte(e.Metadata), &meta)
+	}
+	meta["ai_analysis"] = description
+	b, _ := json.Marshal(meta)
+	return db.Model(&Event{}).Where("id = ?", id).Update("metadata", string(b)).Error
 }
 
 // BatchUpdateEventStatus 批量更新事件状态。
@@ -375,4 +396,31 @@ func GetEventStats(ctx context.Context) (*EventStats, error) {
 	}
 
 	return stats, nil
+}
+
+// GetEventByID 按主键查询单个事件
+func GetEventByID(ctx context.Context, id string) (*Event, error) {
+	db, err := DB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var e Event
+	if err := db.First(&e, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+// ListUnhandledHighSeverityEvents 查询高危/严重且从未触发过 AI 运维的事件（补偿扫描用）
+func ListUnhandledHighSeverityEvents(ctx context.Context, limit int) ([]Event, error) {
+	db, err := DB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var events []Event
+	err = db.Where(
+		"severity IN ? AND status = ? AND id NOT IN (SELECT event_id FROM soar_runs)",
+		[]string{"high", "critical"}, "new",
+	).Order("created_at asc").Limit(limit).Find(&events).Error
+	return events, err
 }

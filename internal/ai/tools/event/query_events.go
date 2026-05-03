@@ -19,6 +19,7 @@ import (
 
 // QueryEventsInput 查询事件参数
 type QueryEventsInput struct {
+	EventID  string `json:"event_id,omitempty"  jsonschema:"description=按事件 ID 精确查询单条事件详情，填写后其他过滤条件忽略"`
 	Severity string `json:"severity,omitempty" jsonschema:"description=按严重程度过滤: critical, high, medium, low，空则不过滤"`
 	Status   string `json:"status,omitempty"   jsonschema:"description=按处理状态过滤: new, processing, resolved, ignored，空则不过滤"`
 	CveID    string `json:"cve_id,omitempty"   jsonschema:"description=按 CVE 编号精确过滤，如 CVE-2024-1234，空则不过滤"`
@@ -62,6 +63,36 @@ func NewQueryEventsTool() tool.InvokableTool {
 			}
 			if limit > 50 {
 				limit = 50
+			}
+
+			// event_id 精确查询：直接按 ID 查单条，忽略其他过滤条件
+			if input.EventID != "" {
+				var event dao.Event
+				if err = db.Where("id = ?", input.EventID).First(&event).Error; err != nil {
+					return fmt.Sprintf(`{"error":"event not found: %s"}`, input.EventID), nil
+				}
+				contentMap := fetchMilvusContentByIDs(ctx, []string{event.ID})
+				r := EventResult{
+					ID:        event.ID,
+					Title:     event.Title,
+					Content:   contentMap[event.ID],
+					EventType: event.EventType,
+					Severity:  event.Severity,
+					Status:    event.Status,
+					CveID:     event.CVEID,
+					RiskScore: event.RiskScore,
+					Source:    event.Source,
+					Metadata:  event.Metadata,
+					CreatedAt: event.CreatedAt.Format("2006-01-02 15:04:05"),
+				}
+				if event.IndexedAt != nil {
+					r.IndexedAt = event.IndexedAt.Format("2006-01-02 15:04:05")
+				}
+				var buf bytes.Buffer
+				enc := json.NewEncoder(&buf)
+				enc.SetEscapeHTML(false)
+				_ = enc.Encode([]EventResult{r})
+				return strings.TrimRight(buf.String(), "\n"), nil
 			}
 
 			// 只打印非空过滤条件，减少日志噪音

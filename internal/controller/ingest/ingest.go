@@ -18,7 +18,7 @@ import (
 	"io"
 
 	v1 "Fo-Sentinel-Agent/api/ingest/v1"
-	"Fo-Sentinel-Agent/internal/ingest"
+	"Fo-Sentinel-Agent/internal/service/ingest"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"

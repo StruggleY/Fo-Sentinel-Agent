@@ -5,6 +5,7 @@ import (
 
 	toolsevent "Fo-Sentinel-Agent/internal/ai/tools/event"
 	toolsintelligence "Fo-Sentinel-Agent/internal/ai/tools/intelligence"
+	toolsops "Fo-Sentinel-Agent/internal/ai/tools/ops"
 	toolsreport "Fo-Sentinel-Agent/internal/ai/tools/report"
 	toolssystem "Fo-Sentinel-Agent/internal/ai/tools/system"
 
@@ -65,6 +66,9 @@ func newReactAgentLambda(ctx context.Context) (lba *compose.Lambda, err error) {
 
 	// 联网搜索：仅当 context 中 WebSearchEnabledKey{}=true 时实际执行，否则返回提示
 	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsintelligence.NewWebSearchTool())
+
+	// AI 运维 ChatOps：在对话中直接触发指定事件的智能运维响应
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, toolsops.NewTriggerOpsTool())
 
 	// react.NewAgent 根据上述配置实例化 ReAct Agent，
 	// 内部维护消息历史，每轮将 Observation 追加后重新调用 LLM。
