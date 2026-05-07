@@ -113,8 +113,8 @@ func IsProtectedAsset(ctx context.Context, assetType, value string) (bool, error
 		return false, err
 	}
 	var count int64
-	db.Model(&OpsProtectedAsset{}).Where("asset_type = ? AND value = ?", assetType, value).Count(&count)
-	return count > 0, nil
+	err = db.Model(&OpsProtectedAsset{}).Where("asset_type = ? AND value = ?", assetType, value).Count(&count).Error
+	return count > 0, err
 }
 
 func CreateProtectedAsset(ctx context.Context, a *OpsProtectedAsset) error {

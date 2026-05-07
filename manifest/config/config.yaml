@@ -129,6 +129,8 @@ tools:
     tavily_api_key: ""
     tavily_base_url: "https://api.tavily.com/search"
     tavily_search_depth: "advanced"   # basic（快速）| advanced（深度，结果更全）
+  github:
+    token: ""   # GitHub Personal Access Token，用于提高 API 限流额度
 
 # 全链路追踪
 trace:
@@ -190,10 +192,16 @@ soar:
   ai_ops:
     # 通知渠道偏好（AI 规划时优先使用已配置的渠道）
     # 可选值：dingtalk / wecom / email / none
-    notify_channel: ""
+    notify_channel: "email"
     # 通知收件人（email 渠道时使用）
     notify_email_to: ""
     # 是否允许 AI 封禁 IP（高危场景）
     allow_block_ip: true
-    # 是否允许 AI 调用深度分析（消耗较多 token）
+    # IP 封禁后端：none（仅记录）/ nginx（写黑名单文件+reload）
+    block_ip_backend: "none"
+    # nginx 黑名单文件路径
+    nginx_blocklist_path: ""
+    # nginx 容器名
+    nginx_container: ""
+    # 是否允许 AI 调用深度分析
     allow_ai_analyze: true

@@ -126,6 +126,9 @@ func githubGet(ctx context.Context, apiURL string, dst any) error {
 	}
 	// Accept header 指定 GitHub API v3 响应格式
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if token := g.Cfg().MustGet(ctx, "tools.github.token", "").String(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("github api: %w", err)

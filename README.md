@@ -96,11 +96,20 @@ Fo-Sentinel-Agent 是面向企业安全运营的智能研判平台，基于多 A
 └────────────────────────────────┬────────────────────────────────────┘
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ API 网关 (GoFrame v2 · :8000)                                      │
-│ 路由: chat/event/report/knowledge/trace/rageval/ingest        │
+│ Nginx 网关 (:80)                                                   │
+│ 路由分发: /      -> frontend:80                                    │
+│         /api   -> backend:8001                                     │
+│         /swagger -> backend:8001/swagger                           │
+│         /api/chat -> backend:8001（SSE 直通）                      │
+│ 安全能力: include 黑名单文件 · deny IP · reload 热更新             │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 后端 API 层 (GoFrame v2 · :8001)                                   │
+│ 路由: chat/event/report/knowledge/trace/rageval/ingest             │
 │ 中间件: JWT 认证 · SessionId · SSE 响应头                           │
 │ 限流: 令牌桶两层限流（全局 QPS → 模块级用户 QPS）                      │
-│ 告警接入: X-API-Key 认证 · Webhook/CEF/LEEF/API Push          │
+│ 告警接入: X-API-Key 认证 · Webhook/CEF/LEEF/API Push               │
 └────────────────────────────────┬────────────────────────────────────┘
                                  │
                         ┌────────┴────────┐
@@ -821,6 +830,7 @@ Controller 接收请求
 - **异常处理**：错误时推送 error 事件，保证前端能正确处理异常情况
 
 ---
+## 技术栈
 
 | 层次 | 技术 | 说明 |
 |------|------|------|
@@ -834,6 +844,8 @@ Controller 接收请求
 | 向量数据库 | Milvus 2.x | 事件/文档向量检索（RAG） |
 | 缓存 | Redis 7.x | 语义缓存 + 对话历史 + 会话摘要 |
 | 前端 | React 18 + TypeScript + Vite | 现代化 Web 界面 |
+| Web 网关 | Nginx 1.27 | 统一入口、反向代理前后端、SSE 转发、IP 黑名单封禁 |
+| 容器编排 | Docker Compose | 前后端分离部署与基础设施编排 |
 | 状态管理 | Zustand | 前端全局状态 |
 | 样式 | TailwindCSS | 响应式 UI |
 | 图表 | ECharts | 趋势图、分布图 |
@@ -860,7 +872,7 @@ cd fo-sentinel-agent
 ### 2. 启动依赖服务
 
 ```bash
-docker compose -f manifest/docker/docker-compose.yml up -d
+docker compose -f manifest/docker/docker-compose.dev.yml up -d
 ```
 
 ### 3. 配置
@@ -878,7 +890,7 @@ cp manifest/config/config.yaml manifest/config/config.local.yaml
 ```bash
 go mod tidy
 go run main.go
-# 服务运行在 http://localhost:8000
+# 服务运行在 http://localhost:8001
 ```
 
 ### 5. 启动前端
@@ -887,14 +899,20 @@ go run main.go
 cd web
 npm install
 npm run dev
-# 前端运行在 http://localhost:3001
+# 前端运行在 http://localhost:5173
 ```
 
 ## 部署
 
 ### Docker 一键部署（推荐）
 
-无需手动安装任何依赖，一条命令启动全部服务（MySQL、Redis、Milvus、前端、后端）：
+当前采用前后端分离部署，Nginx 作为统一入口网关，一条命令可启动基础设施、后端、前端和网关服务。
+
+**容器组成：**
+- `backend`：GoFrame 后端服务（容器内 `:8001`）
+- `frontend`：前端静态资源服务
+- `nginx`：统一入口、反向代理、SSE 转发、IP 黑名单封禁
+- `mysql` / `redis` / `milvus(standalone)` / `etcd` / `minio` / `attu`
 
 ```bash
 # 首次部署前生成 vendor 目录
@@ -905,21 +923,22 @@ bash docker.sh
 ```
 
 启动完成后访问：
-- 前端界面：http://localhost:8001
-- Swagger API：http://localhost:8001/swagger
+- 前端界面：http://localhost
+- OpenAPI：http://localhost/api.json
+- Swagger API：http://localhost/swagger
 - Attu（Milvus 管理）：http://localhost:8000
 
 ### 开发环境
 
 ```bash
 # 仅启动基础设施
-docker compose -f manifest/docker/docker-compose.yml up -d etcd minio standalone redis mysql
+docker compose -f manifest/docker/docker-compose.dev.yml up -d
 
-# 启动后端
+# 启动后端（默认 http://localhost:8001）
 go run main.go
 
-# 启动前端（另开终端）
-cd web && npm run dev
+# 启动前端（另开终端，默认 http://localhost:5173）
+cd web && npm install && npm run dev
 ```
 
 ### 生产部署建议

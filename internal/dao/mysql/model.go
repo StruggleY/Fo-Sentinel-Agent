@@ -274,8 +274,8 @@ func (OpsRunStep) TableName() string { return "ops_run_steps" }
 // OpsProtectedAsset 受保护资产（禁止被自动封禁/操作）
 type OpsProtectedAsset struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement"`
-	AssetType string    `gorm:"column:asset_type;size:32;not null"` // ip / domain / host
-	Value     string    `gorm:"column:value;size:256;not null;uniqueIndex"`
+	AssetType string    `gorm:"column:asset_type;size:32;not null"`
+	Value     string    `gorm:"column:value;size:256;not null"`
 	Reason    string    `gorm:"column:reason;size:500"`
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
 }

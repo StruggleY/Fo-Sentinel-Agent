@@ -419,7 +419,7 @@ func ListUnhandledHighSeverityEvents(ctx context.Context, limit int) ([]Event, e
 	}
 	var events []Event
 	err = db.Where(
-		"severity IN ? AND status = ? AND id NOT IN (SELECT event_id FROM soar_runs)",
+		"severity IN ? AND status = ? AND id NOT IN (SELECT event_id FROM ops_runs)",
 		[]string{"high", "critical"}, "new",
 	).Order("created_at asc").Limit(limit).Find(&events).Error
 	return events, err

@@ -47,6 +47,10 @@ func Init(ctx context.Context) error {
 			initErr = fmt.Errorf("auto migrate: %w", err)
 			return
 		}
+		// ops_protected_assets 联合唯一索引（asset_type + value），幂等
+		if !db.Migrator().HasIndex(&OpsProtectedAsset{}, "idx_protected_asset_type_value") {
+			db.Exec("CREATE UNIQUE INDEX idx_protected_asset_type_value ON ops_protected_assets(asset_type, value)")
+		}
 		// 连接池：MaxOpen 限制并发数防打爆 server，MaxIdle 复用减少握手开销，MaxLifetime 防服务端超时强断
 		if sqlDB, e := db.DB(); e == nil {
 			sqlDB.SetMaxOpenConns(100)

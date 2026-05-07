@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // AnalyzeFunc AI 分析函数类型，由外部注入避免循环依赖
@@ -61,7 +62,10 @@ func (a *BlockIPAction) Execute(ctx context.Context, params map[string]string) (
 			Output:  map[string]string{"ip": ip, "blocked": "false", "reason": "protected"},
 		}, nil
 	}
-	alreadyBlocked, _ := dao.IsProtectedAsset(ctx, "blocked_ip", ip)
+	alreadyBlocked, err := dao.IsProtectedAsset(ctx, "blocked_ip", ip)
+	if err != nil {
+		return ActionResult{}, fmt.Errorf("block_ip: 查询封禁状态失败: %w", err)
+	}
 	if !alreadyBlocked {
 		if err := dao.CreateProtectedAsset(ctx, &dao.OpsProtectedAsset{
 			AssetType: "blocked_ip", Value: ip, Reason: reason,
@@ -69,10 +73,23 @@ func (a *BlockIPAction) Execute(ctx context.Context, params map[string]string) (
 			return ActionResult{}, fmt.Errorf("block_ip: 写入封禁记录失败: %w", err)
 		}
 	}
+
+	// nginx 后端：写黑名单文件并 reload
+	nginxMsg := ""
+	mgr := NewNginxBlocklistManager(ctx)
+	if mgr.IsEnabled() {
+		if err := mgr.AddIP(ctx, ip); err != nil {
+			g.Log().Warningf(ctx, "[block_ip] nginx 封禁失败，已记录数据库: %v", err)
+			nginxMsg = "（nginx reload 失败，仅记录数据库）"
+		} else {
+			nginxMsg = "（已写入 nginx 黑名单并 reload）"
+		}
+	}
+
 	return ActionResult{
 		Success: true,
-		Message: fmt.Sprintf("IP %s 已加入封禁名单", ip),
-		Output:  map[string]string{"ip": ip, "blocked": "true"},
+		Message: fmt.Sprintf("IP %s 已加入封禁名单%s", ip, nginxMsg),
+		Output:  map[string]string{"ip": ip, "blocked": "true", "backend": mgr.backend},
 	}, nil
 }
 

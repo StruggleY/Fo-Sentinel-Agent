@@ -3,6 +3,8 @@
 package main
 
 import (
+	"context"
+
 	"Fo-Sentinel-Agent/internal/ai/ops/engine"
 	"Fo-Sentinel-Agent/internal/ai/retrieval"
 	"Fo-Sentinel-Agent/internal/ai/rule"
@@ -31,6 +33,10 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gctx"
 )
+
+func frontendHostingEnabled(ctx context.Context) bool {
+	return g.Cfg().MustGet(ctx, "server.enable_frontend_hosting", true).Bool()
+}
 
 func main() {
 	ctx := gctx.New()
@@ -72,12 +78,14 @@ func main() {
 
 	// ========== 阶段3：HTTP服务器配置 ==========
 	s := g.Server()
-	// 托管前端静态文件（生产构建产物）
-	s.SetServerRoot("web/dist")
-	// SPA fallback：未匹配到静态文件或 /api 路由时返回 index.html
-	s.BindHandler("/*", func(r *ghttp.Request) {
-		r.Response.ServeFile("web/dist/index.html")
-	})
+	if frontendHostingEnabled(ctx) {
+		// 托管前端静态文件（生产构建产物）
+		s.SetServerRoot("web/dist")
+		// SPA fallback：未匹配到静态文件或 /api 路由时返回 index.html
+		s.BindHandler("/*", func(r *ghttp.Request) {
+			r.Response.ServeFile("web/dist/index.html")
+		})
+	}
 	s.Group("/api", func(group *ghttp.RouterGroup) {
 		// 中间件链：CORS → 响应格式化 → JWT认证 → 限流（限流依赖 JWT 解析的 user_id）
 		group.Middleware(middleware.CORSMiddleware)
