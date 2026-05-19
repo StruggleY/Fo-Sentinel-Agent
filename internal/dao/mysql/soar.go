@@ -9,6 +9,53 @@ import (
 	"gorm.io/gorm"
 )
 
+// ---- Playbook ----
+
+func ListPlaybooks(ctx context.Context) ([]OpsPlaybook, error) {
+	db, err := DB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var list []OpsPlaybook
+	return list, db.Order("created_at desc").Find(&list).Error
+}
+
+func CreatePlaybook(ctx context.Context, p *OpsPlaybook) error {
+	if p.ID == "" {
+		p.ID = uuid.New().String()
+	}
+	db, err := DB(ctx)
+	if err != nil {
+		return err
+	}
+	return db.Create(p).Error
+}
+
+func UpdatePlaybook(ctx context.Context, p *OpsPlaybook) error {
+	db, err := DB(ctx)
+	if err != nil {
+		return err
+	}
+	return db.Save(p).Error
+}
+
+func DeletePlaybook(ctx context.Context, id string) error {
+	db, err := DB(ctx)
+	if err != nil {
+		return err
+	}
+	return db.Delete(&OpsPlaybook{}, "id = ?", id).Error
+}
+
+func GetPlaybook(ctx context.Context, id string) (*OpsPlaybook, error) {
+	db, err := DB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var p OpsPlaybook
+	return &p, db.First(&p, "id = ?", id).Error
+}
+
 // ---- Run ----
 
 func CreateRun(ctx context.Context, r *OpsRun) error {

@@ -19,13 +19,13 @@ ds_think_chat_model:
     - id: "ark-deepseek-v3-think"
       api_key: ""
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "deepseek-v3-1-terminus"
+      model: "ep-20260519155334-6n2hg"
       priority: 1
     # 备用：
     - id: "ark-deepseek-v3-think2"
       api_key: ""
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "deepseek-v3-2-terminus"
+      model: "ep-20260519155334-6n2hg"
       priority: 2
 
 # 快速模型候选列表（意图识别路由 / Executor 步骤调度，低延迟优先）
@@ -34,13 +34,13 @@ ds_quick_chat_model:
     - id: "ark-deepseek-v3-quick"
       api_key: ""
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "deepseek-v3-1-terminus"
+      model: "ep-20260519155334-6n2hg"
       priority: 1
     # 备用：
     - id: "ark-deepseek-v3-quick2"
       api_key: ""
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "deepseek-v3-2-terminus"
+      model: "ep-20260519155334-6n2hg"
       priority: 2
 
 # 向量嵌入模型（DashScope text-embedding-v4，同时用于 Rerank）
@@ -142,8 +142,8 @@ trace:
   # 模型单价（¥/1M tokens，直接填写人民币，无需汇率换算）
   # 键名与 TraceNode.model_name 字段值匹配（大小写不敏感前缀匹配）
   model_pricing:
-    deepseek-v3:
-      input: 2.0              # 火山引擎 Ark ¥2/1M input tokens
+    ep-20260519155334-6n2hg:
+      input: 2.0              # 火山引擎 Ark DeepSeek V3（ep-xxx 格式 endpoint）¥2/1M input tokens
       output: 8.0             # 火山引擎 Ark ¥8/1M output tokens
     text-embedding-v4:
       input: 0.5              # DashScope text-embedding-v4 ¥0.5/1M tokens

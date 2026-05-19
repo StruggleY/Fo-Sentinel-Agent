@@ -13,6 +13,28 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
+// WorkflowRecorder 定义 Plan Pipeline 可选的工作流记录器。
+// 通过 context 注入，避免 plan_pipeline 依赖 controller 或具体持久化实现。
+type WorkflowRecorder interface {
+	Checkpoint(ctx context.Context, stepName string, values map[string]any) error
+	Event(ctx context.Context, eventType, payload string) error
+}
+
+type workflowRecorderCtxKey struct{}
+
+// WithWorkflowRecorder 将工作流记录器注入 context。
+func WithWorkflowRecorder(ctx context.Context, recorder WorkflowRecorder) context.Context {
+	if recorder == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, workflowRecorderCtxKey{}, recorder)
+}
+
+func workflowRecorderFromContext(ctx context.Context) WorkflowRecorder {
+	recorder, _ := ctx.Value(workflowRecorderCtxKey{}).(WorkflowRecorder)
+	return recorder
+}
+
 // PlanStepMsg 是推送给前端的结构化步骤事件，JSON 序列化后通过 SSE plan_step 事件发送。
 // 前端按 type 字段分类渲染：规划步骤清单、执行推理摘要、Worker 结果摘要。
 type PlanStepMsg struct {
@@ -76,6 +98,25 @@ func marshalStepMsg(msg PlanStepMsg) string {
 		return msg.Content
 	}
 	return string(b)
+}
+
+func checkpointWorkflow(ctx context.Context, stepName string, values map[string]any) {
+	recorder := workflowRecorderFromContext(ctx)
+	if recorder == nil {
+		return
+	}
+	if err := recorder.Checkpoint(ctx, stepName, values); err != nil {
+		g.Log().Warningf(ctx, "[PlanPipeline] 写入工作流检查点失败 | step=%s err=%v", stepName, err)
+	}
+}
+
+func summarizeCheckpointContent(content string) string {
+	content = strings.TrimSpace(content)
+	runes := []rune(content)
+	if len(runes) > 500 {
+		return string(runes[:500]) + "…"
+	}
+	return content
 }
 
 // BuildPlanAgent 驱动完整的 Plan-Execute-Replan 循环，通过两个回调实时流式推送输出。
@@ -168,12 +209,16 @@ func BuildPlanAgent(ctx context.Context, query string, onStep func(string), onFi
 			if content == "" {
 				continue
 			}
+			summary := content
+			runes := []rune(content)
+			if len(runes) > 150 {
+				summary = string(runes[:150]) + "…"
+			}
+			checkpointWorkflow(ctx, "worker:"+msg.ToolName, map[string]any{
+				"tool_name": msg.ToolName,
+				"summary":   summarizeCheckpointContent(content),
+			})
 			if onStep != nil {
-				summary := content
-				runes := []rune(content)
-				if len(runes) > 150 {
-					summary = string(runes[:150]) + "…"
-				}
 				onStep(marshalStepMsg(PlanStepMsg{
 					Type:    "tool_result",
 					Name:    workerFriendlyName(msg.ToolName),
@@ -213,6 +258,9 @@ func BuildPlanAgent(ctx context.Context, query string, onStep func(string), onFi
 				Steps []string `json:"steps"`
 			}
 			if json.Unmarshal([]byte(trimmed), &planParsed) == nil && len(planParsed.Steps) > 0 {
+				checkpointWorkflow(ctx, "planner", map[string]any{
+					"steps": planParsed.Steps,
+				})
 				if onStep != nil {
 					onStep(marshalStepMsg(PlanStepMsg{Type: "plan_steps", Steps: planParsed.Steps}))
 				}
@@ -234,6 +282,9 @@ func BuildPlanAgent(ctx context.Context, query string, onStep func(string), onFi
 	// 优先使用 Replanner Respond 解析出的最终答案
 	if finalAnswer != "" {
 		finalAnswer = stripUUIDs(finalAnswer)
+		checkpointWorkflow(ctx, "final", map[string]any{
+			"final_answer": finalAnswer,
+		})
 		if onFinal != nil {
 			onFinal(finalAnswer)
 		}
@@ -245,6 +296,9 @@ func BuildPlanAgent(ctx context.Context, query string, onStep func(string), onFi
 		return "", fmt.Errorf("plan agent 未产生任何文本输出")
 	}
 	fullContent = stripUUIDs(fullContent)
+	checkpointWorkflow(ctx, "final", map[string]any{
+		"final_answer": fullContent,
+	})
 	if onFinal != nil {
 		onFinal(fullContent)
 	}

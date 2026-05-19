@@ -232,6 +232,19 @@ func (MessageFeedback) TableName() string { return "message_feedbacks" }
 
 // ========== AI 智能运维模块 ==========
 
+// OpsPlaybook 运维响应策略
+type OpsPlaybook struct {
+	ID          string         `gorm:"column:id;primaryKey;size:64"`
+	Name        string         `gorm:"column:name;size:128;not null"`
+	Description string         `gorm:"column:description;size:500"`
+	Enabled     bool           `gorm:"column:enabled;default:true;index"`
+	CreatedAt   time.Time      `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt   time.Time      `gorm:"column:updated_at;autoUpdateTime"`
+	DeletedAt   gorm.DeletedAt `gorm:"column:deleted_at;index"`
+}
+
+func (OpsPlaybook) TableName() string { return "ops_playbooks" }
+
 // OpsRun 运维任务执行记录
 type OpsRun struct {
 	ID         string     `gorm:"column:id;primaryKey;size:64"`
@@ -281,3 +294,59 @@ type OpsProtectedAsset struct {
 }
 
 func (OpsProtectedAsset) TableName() string { return "ops_protected_assets" }
+
+// WorkflowRun 工作流运行记录，保存一次运行的整体状态
+type WorkflowRun struct {
+	ID            string         `gorm:"column:id;primaryKey;size:64"`
+	WorkflowKey   string         `gorm:"column:workflow_key;size:128;not null;index"`
+	SessionID     string         `gorm:"column:session_id;size:64;index"`
+	Status        string         `gorm:"column:status;size:32;default:running;index"`
+	InputPayload  string         `gorm:"column:input_payload;type:text"`
+	OutputPayload string         `gorm:"column:output_payload;type:text"`
+	ErrorMessage  string         `gorm:"column:error_message;type:text"`
+	StartedAt     time.Time      `gorm:"column:started_at;type:datetime(3);not null"`
+	FinishedAt    *time.Time     `gorm:"column:finished_at;type:datetime(3)"`
+	DurationMs    int64          `gorm:"column:duration_ms;default:0"`
+	CreatedAt     time.Time      `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt     time.Time      `gorm:"column:updated_at;autoUpdateTime"`
+	DeletedAt     gorm.DeletedAt `gorm:"column:deleted_at;index"`
+}
+
+func (WorkflowRun) TableName() string { return "workflow_runs" }
+
+// WorkflowEvent 工作流事件明细，按运行和序号保持唯一
+type WorkflowEvent struct {
+	ID        uint      `gorm:"primaryKey;autoIncrement"`
+	RunID     string    `gorm:"column:run_id;size:64;not null;uniqueIndex:idx_workflow_events_run_seq,priority:1"`
+	Seq       int       `gorm:"column:seq;not null;uniqueIndex:idx_workflow_events_run_seq,priority:2"`
+	EventType string    `gorm:"column:event_type;size:64;not null;index"`
+	Payload   string    `gorm:"column:payload;type:text"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (WorkflowEvent) TableName() string { return "workflow_events" }
+
+// WorkflowCheckpoint 工作流检查点，保存可恢复的 JSON 快照
+type WorkflowCheckpoint struct {
+	ID            string         `gorm:"column:id;primaryKey;size:64"`
+	RunID         string         `gorm:"column:run_id;size:64;not null;index"`
+	CheckpointKey string         `gorm:"column:checkpoint_key;size:128;not null;index"`
+	SnapshotJSON  string         `gorm:"column:snapshot_json;type:json;not null"`
+	CreatedAt     time.Time      `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt     time.Time      `gorm:"column:updated_at;autoUpdateTime"`
+	DeletedAt     gorm.DeletedAt `gorm:"column:deleted_at;index"`
+}
+
+func (WorkflowCheckpoint) TableName() string { return "workflow_checkpoints" }
+
+// SessionStateRevision 会话状态修订记录，保存会话状态的版本化快照
+type SessionStateRevision struct {
+	ID        uint           `gorm:"primaryKey;autoIncrement"`
+	SessionID string         `gorm:"column:session_id;size:64;not null;uniqueIndex:idx_session_state_revisions_session_revision,priority:1"`
+	Revision  int            `gorm:"column:revision;not null;uniqueIndex:idx_session_state_revisions_session_revision,priority:2"`
+	StateJSON string         `gorm:"column:state_json;type:json;not null"`
+	CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime"`
+	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index"`
+}
+
+func (SessionStateRevision) TableName() string { return "session_state_revisions" }

@@ -54,8 +54,16 @@ type SessionMemory struct {
 	ID              string            `json:"id"`                // 会话 ID
 	RecentMessages  []*schema.Message `json:"recent_messages"`   // 短期记忆（原始消息列表）
 	LongTermSummary string            `json:"long_term_summary"` // 长期摘要文本
+	Revision        int64             `json:"revision"`          // 内部状态版本号，每次状态变更递增
 	summarizing     int32             // CAS 标志：0=空闲，1=总结中
-	mu              sync.Mutex        // 保护 RecentMessages / LongTermSummary 的读写
+	mu              sync.Mutex        // 保护 RecentMessages / LongTermSummary / Revision 的读写
+}
+
+// SessionSnapshot 表示会话记忆的一致性快照，用于跨流程传递时校验状态版本。
+type SessionSnapshot struct {
+	Recent   []*schema.Message
+	Summary  string
+	Revision int64
 }
 
 // SessionMemoryMap 全局会话记忆注册表，key 为会话 ID。
@@ -103,6 +111,26 @@ func (c *SessionMemory) GetLongTermSummary() string {
 	return c.LongTermSummary
 }
 
+// GetRevision 线程安全地返回当前会话记忆版本号。
+func (c *SessionMemory) GetRevision() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.Revision
+}
+
+// Snapshot 线程安全地返回会话记忆快照，并深拷贝消息对象，避免调用方修改内部状态。
+func (c *SessionMemory) Snapshot() SessionSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return SessionSnapshot{
+		Recent:   cloneMessages(c.RecentMessages),
+		Summary:  c.LongTermSummary,
+		Revision: c.Revision,
+	}
+}
+
 // SetState 从外部状态（通常是 Redis 恢复）整体覆写会话记忆。
 // 用于服务重启后从持久化存储恢复上一次的 RecentMessages 和 LongTermSummary。
 func (c *SessionMemory) SetState(recent []*schema.Message, summary string) {
@@ -111,6 +139,7 @@ func (c *SessionMemory) SetState(recent []*schema.Message, summary string) {
 
 	c.RecentMessages = recent
 	c.LongTermSummary = summary
+	c.Revision++
 }
 
 // BuildHistoryWithSummary 将长期摘要和短期记忆拼接为注入 Prompt 的 History 列表。
@@ -131,6 +160,19 @@ func BuildHistoryWithSummary(recent []*schema.Message, summary string) []*schema
 	return history
 }
 
+// cloneMessages 深拷贝消息对象，确保快照与内部记忆不共享消息指针。
+func cloneMessages(messages []*schema.Message) []*schema.Message {
+	cloned := make([]*schema.Message, len(messages))
+	for i, msg := range messages {
+		if msg == nil {
+			continue
+		}
+		msgCopy := *msg
+		cloned[i] = &msgCopy
+	}
+	return cloned
+}
+
 // SetMessages 追加一条消息到短期记忆，并在满足条件时异步触发历史总结。
 //
 // 双触发器（主/辅短路求值，同一会话同时只有一个总结 goroutine 在运行）：
@@ -143,6 +185,7 @@ func (c *SessionMemory) SetMessages(msg *schema.Message) {
 	defer c.mu.Unlock()
 
 	c.RecentMessages = append(c.RecentMessages, msg)
+	c.Revision++
 
 	// 主触发器优先：token 超限直接触发，辅触发器（条数）仅在 token 未超限时求值。
 	tokenExceeded := tokenTrigger > 0 && token.EstimateMessages(c.RecentMessages) > tokenTrigger

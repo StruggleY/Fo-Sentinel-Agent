@@ -26,15 +26,20 @@ type Intent struct {
 
 // NewIntent 创建 Intent 实例，绑定 context 与按 sessionId 隔离的 SessionMemory。
 // 启动时尝试从 Redis 恢复历史状态，Redis 不可用时静默降级（仅使用进程内存）。
-func NewIntent(ctx context.Context, sessionId string) *Intent {
+func NewIntent(ctx context.Context, sessionId string, messageIndex int) *Intent {
 	mem := cache.GetSessionMemory(sessionId)
 
-	// 从 Redis 恢复历史状态（短期消息 + 长期摘要）
-	recent, summary, err := cache.LoadSession(ctx, sessionId)
-	if err == nil && (len(recent) > 0 || summary != "") {
-		mem.SetState(recent, summary)
-	} else if err != nil {
-		g.Log().Warningf(ctx, "[Intent] 从 Redis 恢复会话状态失败，降级为进程内存 | session=%s | err=%v", sessionId, err)
+	if messageIndex <= 1 {
+		// 新会话第一条消息，强制清空历史，不加载 Redis
+		mem.SetState([]*schema.Message{}, "")
+	} else {
+		// 从 Redis 恢复历史状态（短期消息 + 长期摘要）
+		recent, summary, err := cache.LoadSession(ctx, sessionId)
+		if err == nil && (len(recent) > 0 || summary != "") {
+			mem.SetState(recent, summary)
+		} else if err != nil {
+			g.Log().Warningf(ctx, "[Intent] 从 Redis 恢复会话状态失败，降级为进程内存 | session=%s | err=%v", sessionId, err)
+		}
 	}
 
 	return &Intent{ctx: ctx, sessionId: sessionId, memory: mem}

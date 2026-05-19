@@ -43,9 +43,15 @@ func NewClient(r *ghttp.Request) *Client {
 // eventType 为事件类型（如 "message"、"error"），data 为事件内容。
 // 如果 data 包含换行符，会自动分成多行，每行都以 "data: " 开头（符合 SSE 协议）。
 func (c *Client) Send(eventType, data string) {
+	c.SendEvent(time.Now().UnixNano(), eventType, data)
+}
+
+// SendEvent 使用指定事件 ID 推送一条标准 SSE 事件并立即 Flush。
+// 固定 ID 用于前端断线重连后按 Last-Event-ID 或业务游标补发事件。
+func (c *Client) SendEvent(id int64, eventType, data string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.Request.Response.Writef("id: %d\nevent: %s\n", time.Now().UnixNano(), eventType)
+	c.Request.Response.Writef("id: %d\nevent: %s\n", id, eventType)
 
 	// 处理多行内容：将每行都以 "data: " 开头
 	lines := strings.Split(data, "\n")

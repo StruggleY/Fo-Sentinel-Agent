@@ -112,7 +112,15 @@ export const chatService = {
     }
   },
 
-  // Intent 意图驱动多 Agent 对话
+  // ── 问题三：流式中断恢复能力（前端服务层）──────────────────────────────────
+  // 设计思路：
+  //   每次发起请求前从 sessionStorage 读取上次的 run_id 和 last_seq。
+  //   首次请求两者均为空，后端正常创建新 run 并从 seq=1 开始推送。
+  //   断线重连时携带非空的 run_id + last_seq，后端跳过 Agent 重新执行，
+  //   直接从 workflow_events 表补发 seq > last_seq 的历史事件。
+  //   meta 事件到达时保存 runId（首次请求后端新建 run，runId 在此确定）；
+  //   每条事件到达时更新 last_seq，确保游标始终指向最后一条已收到的事件。
+  // Intent 意图驱动多 Agent 对话（支持断线重连）
   multiAgentChat: (
     query: string,
     messageIndex: number,
@@ -120,14 +128,41 @@ export const chatService = {
     webSearch: boolean,
     onMessage: (intent: string, content: string) => void,
     onDone: () => void,
-    signal?: AbortSignal
+    onError?: (e: Error) => void,
+    signal?: AbortSignal,
+    sessionId?: string
   ) => {
+    const sid = sessionId || getCurrentSessionId()
+    const runId = sessionStorage.getItem(`chat_run_id_${sid}`) || ''
+    const lastSeq = parseInt(sessionStorage.getItem(`chat_last_seq_${sid}`) || '0')
+
     streamFetch(
       '/api/chat/v1/chat',
-      { query, session_id: getCurrentSessionId(), message_index: messageIndex, deep_thinking: deepThinking, web_search: webSearch },
-      (type, content) => onMessage(type, content),
+      {
+        query,
+        session_id: sid,
+        message_index: messageIndex,
+        deep_thinking: deepThinking,
+        web_search: webSearch,
+        run_id: runId,
+        last_seq: lastSeq
+      },
+      (type, content, id) => {
+        if (type === 'meta') {
+          try {
+            const meta = JSON.parse(content) as { runId?: string }
+            if (meta.runId) {
+              sessionStorage.setItem(`chat_run_id_${sid}`, meta.runId)
+            }
+          } catch { /* ignore */ }
+        }
+        if (id) {
+          sessionStorage.setItem(`chat_last_seq_${sid}`, id)
+        }
+        onMessage(type, content)
+      },
       onDone,
-      undefined,
+      onError,
       signal
     )
   },

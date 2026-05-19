@@ -3,7 +3,47 @@ package v1
 
 import "github.com/gogf/gf/v2/frame/g"
 
-// ---- Runs ----
+// ---- Playbook ----
+
+type PlaybookItem struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	CreatedAt   string `json:"created_at,omitempty"`
+}
+
+type ListPlaybooksReq struct {
+	g.Meta `path:"/ops/v1/playbooks" method:"get"`
+}
+type ListPlaybooksRes struct {
+	Items []PlaybookItem `json:"items"`
+}
+
+type CreatePlaybookReq struct {
+	g.Meta      `path:"/ops/v1/playbooks" method:"post"`
+	Name        string `json:"name" v:"required"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled" d:"true"`
+}
+type CreatePlaybookRes struct {
+	ID string `json:"id"`
+}
+
+type UpdatePlaybookReq struct {
+	g.Meta      `path:"/ops/v1/playbooks/{id}" method:"put"`
+	ID          string `p:"id" v:"required"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     *bool  `json:"enabled"`
+}
+type UpdatePlaybookRes struct{}
+
+type DeletePlaybookReq struct {
+	g.Meta `path:"/ops/v1/playbooks/{id}" method:"delete"`
+	ID     string `p:"id" v:"required"`
+}
+type DeletePlaybookRes struct{}
 
 type RunItem struct {
 	ID            string        `json:"id"`

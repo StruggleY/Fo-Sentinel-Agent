@@ -2,15 +2,51 @@ package chatsvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"Fo-Sentinel-Agent/internal/ai/cache"
+	"Fo-Sentinel-Agent/internal/ai/workflow"
+	"Fo-Sentinel-Agent/internal/dao/mysql"
 	redisdao "Fo-Sentinel-Agent/internal/dao/redis"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"gorm.io/gorm"
 )
 
 // RollbackSession 回溯会话到指定消息索引
+func RollbackWorkflowToCheckpoint(ctx context.Context, runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("workflow run id is empty")
+	}
+
+	db, err := mysql.DB(ctx)
+	if err != nil {
+		return fmt.Errorf("init workflow store: %w", err)
+	}
+	store := workflow.NewGORMStore(db)
+
+	checkpoint, err := store.LatestCheckpoint(ctx, runID, "")
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("latest checkpoint not found for workflow run %s", runID)
+		}
+		return fmt.Errorf("latest checkpoint lookup failed for workflow run %s: %w", runID, err)
+	}
+	if checkpoint.RunID == "" {
+		return fmt.Errorf("latest checkpoint not found for workflow run %s", runID)
+	}
+
+	if err := store.FinishRun(ctx, runID, "rolled_back", "", "rolled back to latest checkpoint"); err != nil {
+		return fmt.Errorf("mark workflow run rolled back: %w", err)
+	}
+
+	g.Log().Infof(ctx, "[Rollback] Rollback workflow run %s to checkpoint %s step %s", runID, checkpoint.CheckpointID, checkpoint.Step)
+	return nil
+}
+
 func RollbackSession(ctx context.Context, sessionID string, targetIndex int) (int, error) {
 	recent, summary, err := redisdao.LoadSession(ctx, sessionID)
 	if err != nil {

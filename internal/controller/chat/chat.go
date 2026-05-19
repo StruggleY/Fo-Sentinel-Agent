@@ -5,9 +5,11 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	apichat "Fo-Sentinel-Agent/api/chat"
@@ -15,6 +17,8 @@ import (
 	aidoc "Fo-Sentinel-Agent/internal/ai/document"
 	toolsintelligence "Fo-Sentinel-Agent/internal/ai/tools/intelligence"
 	"Fo-Sentinel-Agent/internal/ai/trace"
+	"Fo-Sentinel-Agent/internal/ai/workflow"
+	"Fo-Sentinel-Agent/internal/dao/mysql"
 	chatsvc "Fo-Sentinel-Agent/internal/service/chat"
 	"Fo-Sentinel-Agent/utility/sse"
 
@@ -27,6 +31,45 @@ type ControllerV1 struct{}
 
 func NewV1() apichat.IChatV1 {
 	return &ControllerV1{}
+}
+
+// replayWorkflowEvents 按持久化事件序号补发 SSE 事件，不重复写入事件表。
+func replayWorkflowEvents(client *sse.Client, events []workflow.StreamEvent) {
+	for _, event := range events {
+		client.SendEvent(event.ID, event.Type, workflowPayloadToString(event.Payload))
+	}
+}
+
+// workflowPayloadToString 将工作流事件载荷转换为 SSE data 字符串。
+func workflowPayloadToString(payload any) string {
+	if payload == nil {
+		return ""
+	}
+	if text, ok := payload.(string); ok {
+		return text
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprint(payload)
+	}
+	return string(data)
+}
+
+// initWorkflowStore 尽力初始化工作流事件存储；失败时返回 nil，聊天主流程继续执行。
+func initWorkflowStore(ctx context.Context) workflow.Store {
+	defer func() {
+		if r := recover(); r != nil {
+			g.Log().Warningf(ctx, "[Chat] 初始化 workflow store 发生 panic，降级为非持久化 SSE | err=%v", r)
+		}
+	}()
+	db, err := mysql.DB(ctx)
+	if err != nil || db == nil {
+		if err != nil {
+			g.Log().Warningf(ctx, "[Chat] 初始化 workflow store 失败，降级为非持久化 SSE | err=%v", err)
+		}
+		return nil
+	}
+	return workflow.NewGORMStore(db)
 }
 
 // FileUpload 上传知识文档并构建向量索引，单次上限 50 MB。
@@ -139,10 +182,96 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, 
 
 	client := sse.NewClient(g.RequestFromCtx(ctx))
 
+	// 启用工作流事件存储；不可用时仅影响断线补发与落库，不影响聊天主流程。
+	workflowStore := initWorkflowStore(ctx)
+	workflowRunID := req.RunID
+	var workflowSeq atomic.Int64
+	if workflowStore != nil && workflowRunID == "" {
+		inputPayload := workflowPayloadToString(map[string]any{
+			"query":        req.Query,
+			"deepThinking": req.DeepThinking,
+			"webSearch":    req.WebSearch,
+		})
+		run, err := workflowStore.CreateRun(ctx, workflow.WorkflowRunInput{
+			WorkflowKey:  "chat.intent",
+			SessionID:    req.SessionId,
+			InputPayload: inputPayload,
+		})
+		if err != nil {
+			g.Log().Warningf(ctx, "[Chat] 创建 workflow run 失败，降级为非持久化 SSE | err=%v", err)
+			workflowStore = nil
+		} else {
+			workflowRunID = run.ID
+		}
+	}
+
+	// ── 流式中断恢复能力 ────────────────────────────────
+	// 问题根因：
+	//   SSE 是单向长连接，网络抖动、代理超时、浏览器刷新均会导致连接中断。
+	//   中断后前端重新发起请求，若后端重新执行 Agent，会产生重复 LLM 调用和重复费用，
+	//   且已流出的内容无法续接，用户看到的回复从头开始，体验割裂。
+	//
+	// 设计思路：
+	//   每条 SSE 事件写入 workflow_events 表（run_id + seq 唯一索引），
+	//   前端通过 SSE id 字段持久化 last_seq 到 sessionStorage。
+	//   重连时携带 run_id + last_seq，后端调用 ListEventsAfter 查出缺失事件，
+	//   通过 replayWorkflowEvents 补发给前端，Agent 无需重新执行。
+	//   AppendEvent 使用 ON CONFLICT DO NOTHING，保证重放幂等，不产生重复记录。
+	// 重连请求携带 run_id 与 last_seq 时，先补发历史事件。
+	if workflowStore != nil && req.RunID != "" && req.LastSeq > 0 {
+		events, err := workflowStore.ListEventsAfter(ctx, req.RunID, req.LastSeq)
+		if err != nil {
+			g.Log().Warningf(ctx, "[Chat] 补发 workflow 事件失败 | run_id=%s | last_seq=%d | err=%v", req.RunID, req.LastSeq, err)
+		} else {
+			replayWorkflowEvents(client, events)
+			workflowSeq.Store(req.LastSeq)
+			if len(events) > 0 {
+				workflowSeq.Store(events[len(events)-1].ID)
+			}
+		}
+	}
+
+	// sendEvent 统一发送 SSE；工作流存储可用时使用原子递增 seq 作为 SSE id 并落库。
+	// atomic.Add 保证心跳 goroutine 与主 goroutine 并发调用时 seq 全局唯一、单调递增，
+	// 前端凭 id 字段追踪 last_seq，断线重连时后端据此精确补发缺失事件（见问题三）。
+	sendEvent := func(eventType, data string) {
+		if workflowStore == nil || workflowRunID == "" {
+			client.Send(eventType, data)
+			return
+		}
+		seq := workflowSeq.Add(1)
+		event := workflow.StreamEvent{
+			ID:        seq,
+			RunID:     workflowRunID,
+			Type:      eventType,
+			Payload:   data,
+			CreatedAt: time.Now(),
+		}
+		if err := workflowStore.AppendEvent(ctx, event); err != nil {
+			g.Log().Warningf(ctx, "[Chat] 追加 workflow 事件失败 | run_id=%s | seq=%d | type=%s | err=%v", workflowRunID, seq, eventType, err)
+		}
+		client.SendEvent(seq, eventType, data)
+	}
+
+	defer func() {
+		if workflowStore == nil || workflowRunID == "" || req.RunID != "" {
+			return
+		}
+		status := workflow.RunStatusSuccess
+		errorMessage := ""
+		if execErr != nil {
+			status = workflow.RunStatusFailed
+			errorMessage = execErr.Error()
+		}
+		if err := workflowStore.FinishRun(ctx, workflowRunID, status, "", errorMessage); err != nil {
+			g.Log().Warningf(ctx, "[Chat] 完成 workflow run 失败 | run_id=%s | err=%v", workflowRunID, err)
+		}
+	}()
+
 	// 推送 meta 事件：携带会话元数据，供前端显示 Agent 状态和调试追踪
-	metaData := fmt.Sprintf(`{"sessionId":%q,"timestamp":%q,"deepThinking":%v}`,
-		req.SessionId, time.Now().Format(time.RFC3339), req.DeepThinking)
-	client.Send("meta", metaData)
+	metaData := fmt.Sprintf(`{"sessionId":%q,"runId":%q,"timestamp":%q,"deepThinking":%v}`,
+		req.SessionId, workflowRunID, time.Now().Format(time.RFC3339), req.DeepThinking)
+	sendEvent("meta", metaData)
 
 	// 心跳 goroutine：每 15 秒推送一次 keepalive 注释行，防止 Plan Agent 长时间执行期间
 	// 代理或浏览器因空闲超时关闭 SSE 连接。
@@ -176,15 +305,12 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, 
 		agentCtx = context.WithValue(agentCtx, toolsintelligence.WebSearchEnabledKey{}, true)
 	}
 	if req.DeepThinking {
-		// LLM 速率令牌桶
-		// Wait(ctx) 等待令牌，令牌不足时阻塞直到 agentCtx 超时
-		err = chatsvc.ExecuteDeepThink(agentCtx, req.SessionId, req.Query, func(intentType, chunk string) {
-			client.Send(intentType, chunk)
+		err = chatsvc.ExecuteDeepThink(agentCtx, req.SessionId, req.Query, req.MessageIndex, func(intentType, chunk string) {
+			sendEvent(intentType, chunk)
 		})
 	} else {
-		// LLM 速率令牌桶
-		err = chatsvc.ExecuteIntent(agentCtx, req.SessionId, req.Query, func(intentType, chunk string) {
-			client.Send(intentType, chunk)
+		err = chatsvc.ExecuteIntent(agentCtx, req.SessionId, req.Query, req.MessageIndex, func(intentType, chunk string) {
+			sendEvent(intentType, chunk)
 		})
 	}
 	execErr = err
@@ -194,7 +320,7 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, 
 
 	if err != nil {
 		g.Log().Errorf(ctx, "[Intent] 执行失败 | deep_thinking=%v | err=%v", req.DeepThinking, err)
-		client.Send("error", err.Error())
+		sendEvent("error", err.Error())
 	}
 
 	client.Done()

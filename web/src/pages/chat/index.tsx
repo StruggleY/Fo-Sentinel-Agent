@@ -6,7 +6,6 @@ import remarkGfm from 'remark-gfm'
 import { normalizeMarkdown, cn } from '@/utils'
 import { chatService, ChatSession } from '@/services'
 import { ragevalService } from '@/services/rageval'
-import { opsService } from '@/services/ops'
 import { useContextStore } from '@/stores/contextStore'
 import SessionList from './components/SessionList'
 import WelcomeScreen from './components/WelcomeScreen'
@@ -56,7 +55,7 @@ export default function Chat() {
   // 记录当前"正在 loading"的消息 ID，防止旧 stream 的 onDone 错误清除新 stream 的 loading 状态
   const loadingStreamRef = useRef<string | null>(null)
 
-  const { currentEventId, currentEventTitle } = useContextStore()
+  const { currentEventId, currentEventTitle, setContext } = useContextStore()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -181,6 +180,7 @@ export default function Chat() {
     setIsLoading(false)
     setDeepThinking(false)
     setWebSearch(false)
+    setContext('chat')
   }
 
   const handleDeleteSession = (sid: string) => {
@@ -212,11 +212,11 @@ export default function Chat() {
     setEditingContent('')
   }
 
-  // 保存编辑（删除该消息之后的所有内容，重新发送）
+  // 保存编辑（保留该消息，删除之后的 assistant 回复，重新发送）
   const handleSaveEdit = async (index: number) => {
     if (!currentSessionId || !editingContent.trim()) return
 
-    // 删除该消息及之后的所有消息
+    // 保留 index 之前的消息（不含当前 user 消息），删除 index 及之后的所有消息
     const newMessages = messages.slice(0, index)
     setMessages(newMessages)
     saveMessages(currentSessionId, newMessages)
@@ -232,23 +232,25 @@ export default function Chat() {
     setVotes(newVotes)
     localStorage.setItem(`chat_votes_${currentSessionId}`, JSON.stringify(newVotes))
 
-    // 调用后端回滚API
-    try {
-      console.log('[编辑] 调用回滚 API', { sessionId: currentSessionId, targetIndex: index - 1 })
-      const result = await chatService.rollbackSession(currentSessionId, index - 1)
-      console.log('[编辑] 回滚成功', result)
-    } catch (err) {
-      console.error('[编辑] 回滚失败:', err)
-    }
+    // 重置加载状态，确保 handleSend 不被 isLoading 拦截
+    setIsLoading(false)
+    loadingStreamRef.current = null
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
 
-    // 重新发送编辑后的消息
-    handleSend(editingContent.trim())
+    // 调用后端回滚API（不阻塞发送）
+    chatService.rollbackSession(currentSessionId, index - 1).catch(err => {
+      console.error('[编辑] 回滚失败:', err)
+    })
+
+    // 重新发送编辑后的消息（force=true 跳过 isLoading 检查）
+    handleSend(editingContent.trim(), true)
   }
 
-  // ── 发送消息（overrideText 来自技能卡片或事件跳转） ──────────────────────────
-  const handleSend = async (overrideText?: string) => {
+  // ── 发送消息（overrideText 来自技能卡片或事件跳转；force=true 跳过 isLoading 检查，用于编辑回溯） ──────────────────────────
+  const handleSend = async (overrideText?: string, force?: boolean) => {
     const rawContent = overrideText !== undefined ? overrideText : input
-    if (!rawContent.trim() || isLoading) return
+    if (!rawContent.trim() || (isLoading && !force)) return
 
     let sid = currentSessionId
     if (!sid) {
@@ -306,6 +308,10 @@ export default function Chat() {
     const capturedSessionId = sid
     const capturedMessageId = assistantMessage.id
     loadingStreamRef.current = capturedMessageId
+
+    // 断线重连：最多重试 2 次，每次间隔 1s
+    let retryCount = 0
+    const MAX_RETRIES = 2
 
     const flushContent = () => {
       setMessages((prev) =>
@@ -427,13 +433,10 @@ export default function Chat() {
                 : m
             )
           )
-          // 只有本次 stream 仍是"活跃 stream"时才清除 loading，
-          // 防止后台旧 stream 完成时误清除新 session 的 loading 状态
           if (loadingStreamRef.current === capturedMessageId) {
             setIsLoading(false)
             loadingStreamRef.current = null
           }
-          // 直接写入 localStorage，即使组件已卸载（页面跳转后回来仍能看到完整回复）
           try {
             const raw = localStorage.getItem(`chat_messages_${capturedSessionId}`)
             if (raw) {
@@ -448,7 +451,54 @@ export default function Chat() {
             }
           } catch { /* ignore */ }
         },
-        abortCtrl.signal
+    // ── 问题三：流式中断恢复能力（前端重连逻辑）──────────────────────────────
+    // 设计思路：
+    //   onError 触发时说明 SSE 连接异常中断（网络抖动、代理超时等）。
+    //   此时 sessionStorage 中已有 run_id 和 last_seq（由 chat.ts 在每条事件到达时更新），
+    //   重新调用 multiAgentChat 即可携带这两个游标，后端补发缺失事件，无需重跑 Agent。
+    //   重连回调只追加内容（不重置 streamingContentRef），保证已渲染内容不丢失。
+    //   最多重试 MAX_RETRIES 次，间隔随重试次数线性增长（1s、2s），
+    //   避免后端压力过大；超出上限或用户主动取消（abortCtrl.signal.aborted）则终止。
+    (err) => {
+      // 网络断线自动重连（最多 MAX_RETRIES 次），利用已持久化的 run_id + last_seq 补发
+          if (retryCount < MAX_RETRIES && loadingStreamRef.current === capturedMessageId && !abortCtrl.signal.aborted) {
+            retryCount++
+            setTimeout(() => {
+              chatService.multiAgentChat(
+                messageContent, messageIndex, deepThinking, webSearch,
+                (agent, content) => {
+                  streamingContentRef.current += agent !== 'status' && agent !== 'meta' && agent !== 'plan_step' ? content : ''
+                  flushContent()
+                },
+                () => {
+                  if (loadingStreamRef.current === capturedMessageId) {
+                    setIsLoading(false)
+                    loadingStreamRef.current = null
+                  }
+                  setMessages((prev) => prev.map((m) =>
+                    m.id === capturedMessageId ? { ...m, isStreaming: false, isPlanRunning: false, agentStatus: undefined } : m
+                  ))
+                },
+                undefined,
+                abortCtrl.signal,
+                sid
+              )
+            }, 1000 * retryCount)
+          } else {
+            // 重试耗尽或主动取消，显示错误
+            setMessages((prev) => prev.map((m) =>
+              m.id === capturedMessageId
+                ? { ...m, isStreaming: false, isPlanRunning: false, agentStatus: undefined, content: streamingContentRef.current || `请求失败：${err.message}` }
+                : m
+            ))
+            if (loadingStreamRef.current === capturedMessageId) {
+              setIsLoading(false)
+              loadingStreamRef.current = null
+            }
+          }
+        },
+        abortCtrl.signal,
+        sid
       )
     } catch {
       setIsLoading(false)
@@ -570,7 +620,6 @@ export default function Chat() {
                     onCancelEdit={handleCancelEdit}
                     onSaveEdit={handleSaveEdit}
                     onEditingContentChange={setEditingContent}
-                    currentEventId={currentEventId}
                   />
                 ))}
                 <div ref={messagesEndRef} />
@@ -618,12 +667,10 @@ interface MessageBubbleProps {
   onCancelEdit: () => void
   onSaveEdit: (index: number) => void
   onEditingContentChange: (content: string) => void
-  currentEventId: string | null
 }
 
-function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing, editingContent, onStartEdit, onCancelEdit, onSaveEdit, onEditingContentChange, currentEventId }: MessageBubbleProps) {
+function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing, editingContent, onStartEdit, onCancelEdit, onSaveEdit, onEditingContentChange }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false)
-  const [showPlaybookPicker, setShowPlaybookPicker] = useState(false)
   const editTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   const adjustEditHeight = useCallback(() => {
@@ -837,19 +884,6 @@ function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing,
                     <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1F2937]" />
                   </div>
                 </div>
-                {currentEventId && (
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowPlaybookPicker(!showPlaybookPicker)}
-                      className="flex items-center gap-1 px-2 py-1 rounded-full text-xs text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors"
-                    >
-                      <Zap className="w-3 h-3" /> 执行响应
-                    </button>
-                    {showPlaybookPicker && (
-                      <PlaybookPicker eventId={currentEventId} onClose={() => setShowPlaybookPicker(false)} />
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1280,46 +1314,3 @@ function ThinkingBlock({ thinking, isThinking, isDone, thinkDuration }: Thinking
   )
 }
 
-// ── PlaybookPicker ─────────────────────────────────────────────────────────────
-
-function PlaybookPicker({ eventId, onClose }: { eventId: string; onClose: () => void }) {
-  const [playbooks, setPlaybooks] = useState<{ id: string; name: string }[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    opsService.listPlaybooks()
-      .then(list => setPlaybooks(list.filter(p => p.enabled)))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
-
-  const handleSelect = async (playbookId: string) => {
-    onClose()
-    try {
-      await opsService.testPlaybook(playbookId, eventId)
-    } catch { /* 静默失败 */ }
-  }
-
-  return (
-    <div className="absolute bottom-full left-0 mb-2 w-52 bg-white rounded-xl border border-slate-200 shadow-lg z-50 overflow-hidden">
-      <div className="px-3 py-2 border-b border-slate-100 text-xs font-medium text-gray-500">选择响应策略</div>
-      {loading ? (
-        <div className="px-3 py-3 text-xs text-gray-400">加载中...</div>
-      ) : playbooks.length === 0 ? (
-        <div className="px-3 py-3 text-xs text-gray-400">暂无可用策略</div>
-      ) : (
-        <div className="max-h-48 overflow-y-auto">
-          {playbooks.map(pb => (
-            <button
-              key={pb.id}
-              onClick={() => handleSelect(pb.id)}
-              className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
-            >
-              {pb.name}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}

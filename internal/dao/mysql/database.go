@@ -3,6 +3,8 @@ package mysql
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var (
@@ -34,7 +37,15 @@ func Init(ctx context.Context) error {
 				rawDSN += "?loc=Local"
 			}
 		}
-		db, err := gorm.Open(mysql.Open(rawDSN), &gorm.Config{})
+		db, err := gorm.Open(mysql.Open(rawDSN), &gorm.Config{
+			Logger: logger.New(
+				log.New(os.Stdout, "\r\n", log.LstdFlags),
+				logger.Config{
+					LogLevel:                  logger.Error,
+					IgnoreRecordNotFoundError: true,
+				},
+			),
+		})
 		if err != nil {
 			initErr = fmt.Errorf("open mysql: %w", err)
 			return
@@ -42,7 +53,8 @@ func Init(ctx context.Context) error {
 		if err = db.WithContext(ctx).AutoMigrate(
 			&Event{}, &Subscription{}, &Report{}, &User{}, &Setting{}, &QueryTermMapping{},
 			&TraceRun{}, &TraceNode{}, &KnowledgeBase{}, &KnowledgeDocument{}, &KnowledgeChunk{},
-			&MessageFeedback{}, &OpsRun{}, &OpsRunStep{}, &OpsProtectedAsset{},
+			&MessageFeedback{}, &OpsPlaybook{}, &OpsRun{}, &OpsRunStep{}, &OpsProtectedAsset{},
+			&WorkflowRun{}, &WorkflowEvent{}, &WorkflowCheckpoint{}, &SessionStateRevision{},
 		); err != nil {
 			initErr = fmt.Errorf("auto migrate: %w", err)
 			return

@@ -20,12 +20,12 @@ ds_think_chat_model:
     - id: "ark-deepseek-v3-think"
       api_key: ""
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "deepseek-v3-1-terminus"
+      model: "ep-20260519155334-6n2hg"
       priority: 1
     - id: "ark-deepseek-v3-think2"
       api_key: ""
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "deepseek-v3-1-terminus"
+      model: "ep-20260519155334-6n2hg"
       priority: 2
 
 # 快速模型候选列表（意图识别路由 / Executor 步骤调度，低延迟优先）
@@ -34,12 +34,12 @@ ds_quick_chat_model:
     - id: "ark-deepseek-v3-quick"
       api_key: ""
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "deepseek-v3-1-terminus"
+      model: "ep-20260519155334-6n2hg"
       priority: 1
     - id: "ark-deepseek-v3-quick2"
       api_key: ""
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "deepseek-v3-1-terminus"
+      model: "ep-20260519155334-6n2hg"
       priority: 2
 
 # 向量嵌入模型（DashScope text-embedding-v4，同时用于 Rerank）
@@ -133,7 +133,7 @@ trace:
   record_sql: true
   db_slow_threshold_ms: 100
   model_pricing:
-    deepseek-v3:
+    ep-20260519155334-6n2hg:
       input: 2.0
       output: 8.0
     text-embedding-v4:

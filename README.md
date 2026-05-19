@@ -811,28 +811,48 @@ create_report → 持久化到 MySQL reports 表
 
 ### 13. SSE 流式输出
 
-AI 分析可能需要数十秒才能完成，如果等分析完再一次性返回，用户体验极差。系统所有 AI 分析过程都通过 Server-Sent Events 实时推流，用户可以看到推理步骤和工具调用过程。
+AI 分析可能需要数十秒才能完成，如果等分析完再一次性返回，用户体验极差。系统所有 AI 分析过程都通过 Server-Sent Events 实时推流，用户可以看到推理步骤和工具调用过程。同时通过工作流持久化机制解决了并发写入冲突、会话回滚和断线续传三个核心问题。
 
 #### 主要流程
 
 ```
 Controller 接收请求
         ↓
-    推送 meta 事件 (sessionId/timestamp)
+    创建 workflow_runs 记录，获取 run_id
+        ↓
+    推送 meta 事件 (sessionId / run_id / timestamp)
+        ↓
+    启动心跳 goroutine（每 15s 推送 keepalive 注释行，防代理超时断连）
         ↓
     推送 status 事件 (Agent 路由状态)
         ↓
-    流式推送内容块 (chat/event/report/risk/solve/intel/plan)
+    流式推送内容块 (chat/event/report/risk/solve/intel/plan/plan_step)
+    每条事件通过 atomic.Int64 原子递增 seq，落库到 workflow_events
         ↓
-    推送 done 事件 (流结束)
+    推送 done 事件 (流结束)，更新 workflow_runs 状态
+```
+
+#### 断线续传流程
+
+```
+首次请求：
+    前端收到每条 SSE 事件 → 将 run_id + seq 存入 sessionStorage
+
+断线重连：
+    前端携带 run_id + last_seq 重新请求
+        ↓
+    后端 SELECT * FROM workflow_events WHERE run_id=? AND seq > last_seq
+        ↓
+    replayWorkflowEvents 补发缺失事件给前端
+        ↓
+    Agent 不重新执行，前端内容无缝续接
 ```
 
 **核心特性**
 
-- **多类型事件**：支持 meta、status、内容流、plan_step、error、done 等事件类型
-- **按意图分类**：标准模式按 Agent 类型推送，深度思考模式推送 plan_step 和 plan 事件
-- **实时反馈**：用户可实时看到 Agent 推理步骤、工具调用过程和中间结果
-- **异常处理**：错误时推送 error 事件，保证前端能正确处理异常情况
+- **多类型事件**：支持 meta、status、内容流（chat/event/report/risk/solve/intel/plan）、plan_step、error、done 等事件类型
+- **断线续传**：每条 SSE 事件实时落库，前端持久化 `run_id + last_seq`，重连时后端精确补发缺失事件，Agent 无需重跑
+- **会话回滚**：Plan Agent 执行失败时，自动回滚本轮写入的 UserMessage（同时截断进程内 SessionMemory 和 Redis）
 
 ---
 ## 技术栈

@@ -2,25 +2,29 @@
  * streamFetch 统一标准 SSE 协议的读流工具。
  *
  * 解析后端推送的标准 SSE 格式：
+ *   id: <seq>\n
  *   event: <type>\n
  *   data: <content>\n
  *   \n
  *
- * 支持的事件类型：
- *   - meta      会话元数据（sessionId、timestamp），在流开始时推送一次
- *   - status    处理状态通知（路由、Agent 切换）
- *   - chat/event/report/risk/solve/intel/ops  各 Agent 的内容流
- *   - error     错误通知
- *   - done      流结束
- *
  * 流结束标志：data: [DONE]\n\n
  *
- * 适用所有 SSE 端点：intent、pipeline/stream、chat_stream
+ * ── 问题三：流式中断恢复能力（前端协议层）──────────────────────────────────
+ * 问题根因：
+ *   浏览器 EventSource 不支持 POST，且断线后无法携带自定义游标重连。
+ *   原始实现忽略了 SSE 协议的 id 字段，导致前端无法追踪已收到的事件位置，
+ *   断线后只能从头重新请求，后端被迫重新执行 Agent。
+ *
+ * 设计思路：
+ *   解析每条 SSE 事件的 id 字段（后端用 atomic.Int64 保证全局单调递增），
+ *   通过第三个参数 id 透传给调用方（chat.ts）。
+ *   调用方将 id 持久化到 sessionStorage（key: chat_last_seq_<sessionId>），
+ *   断线重连时作为 last_seq 随请求体发送给后端，后端据此补发缺失事件。
  */
 export function streamFetch(
   url: string,
   body: unknown,
-  onChunk: (type: string, content: string) => void,
+  onChunk: (type: string, content: string, id?: string) => void,
   onDone: () => void,
   onError?: (e: Error) => void,
   signal?: AbortSignal
@@ -36,7 +40,6 @@ export function streamFetch(
     signal,
   })
     .then(async res => {
-      // 处理限流/并发/认证 HTTP 错误（非 SSE 流）
       if (!res.ok) {
         const errMap: Record<number, string> = {
           401: '请先登录',
@@ -52,6 +55,7 @@ export function streamFetch(
 
       const decoder = new TextDecoder()
       let buffer = ''
+      let currentId = ''
       let currentEvent = ''
       let currentData = ''
 
@@ -64,7 +68,9 @@ export function streamFetch(
         buffer = lines.pop() ?? ''
 
         for (const line of lines) {
-          if (line.startsWith('event: ')) {
+          if (line.startsWith('id: ')) {
+            currentId = line.slice(4).trim()
+          } else if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim()
           } else if (line.startsWith('data: ')) {
             const data = line.slice(6)
@@ -76,9 +82,10 @@ export function streamFetch(
               if (currentEvent === 'done') { onDone(); return }
               if (currentEvent === 'error') { onError?.(new Error(currentData)); return }
               if (currentEvent !== 'connected') {
-                onChunk(currentEvent, currentData)
+                onChunk(currentEvent, currentData, currentId || undefined)
               }
             }
+            currentId = ''
             currentEvent = ''
             currentData = ''
           }
@@ -87,7 +94,6 @@ export function streamFetch(
       onDone()
     })
     .catch(e => {
-      // AbortError 是主动取消，不触发 onError
       if (e instanceof Error && e.name === 'AbortError') return
       onError?.(e instanceof Error ? e : new Error(String(e)))
     })
