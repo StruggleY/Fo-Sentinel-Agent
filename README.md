@@ -850,9 +850,9 @@ Controller 接收请求
 
 **核心特性**
 
-- **多类型事件**：支持 meta、status、内容流（chat/event/report/risk/solve/intel/plan）、plan_step、error、done 等事件类型
-- **断线续传**：每条 SSE 事件实时落库，前端持久化 `run_id + last_seq`，重连时后端精确补发缺失事件，Agent 无需重跑
-- **会话回滚**：Plan Agent 执行失败时，自动回滚本轮写入的 UserMessage（同时截断进程内 SessionMemory 和 Redis）
+- **多类型事件**：meta / status / 内容流 / plan_step / error / done
+- **断线续传**：事件实时落库，重连携带 `run_id + last_seq`，后端补发缺失事件
+- **会话回滚**：Plan Agent 失败时回滚本轮 UserMessage，同步截断进程内存和 Redis
 
 ---
 ## 技术栈
