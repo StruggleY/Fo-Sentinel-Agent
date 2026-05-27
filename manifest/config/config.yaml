@@ -164,7 +164,7 @@ limiter:
   rate_user_qps: 20          # 默认
   # Agent 执行超时（秒）
   agent_timeout_sec: 90
-  agent_deep_timeout_sec: 300
+  agent_deep_timeout_sec: 600
 
 knowledge:
   upload_dir: "manifest/upload/knowledge"  # 上传文件本地保存根目录

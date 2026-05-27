@@ -23,6 +23,8 @@ import (
 
 const chatWorkflowKey = "chat.intent"
 
+const maxThinkTimeout = 30 * time.Second
+
 type workflowRunCursorCtxKey struct{}
 
 // WithWorkflowRunCursor 将 controller 创建的 workflow run id 和已持久化序号注入 context，供 service 复用同一条运行记录。
@@ -42,6 +44,24 @@ type workflowRunCursor struct {
 func workflowRunCursorFromContext(ctx context.Context) (string, int64) {
 	cursor, _ := ctx.Value(workflowRunCursorCtxKey{}).(workflowRunCursor)
 	return strings.TrimSpace(cursor.runID), cursor.seq
+}
+
+func normalizeThinkTimeout(parentBudget time.Duration) time.Duration {
+	if parentBudget <= 0 {
+		return maxThinkTimeout
+	}
+	if parentBudget < maxThinkTimeout {
+		return parentBudget
+	}
+	return maxThinkTimeout
+}
+
+func deadlineFromContext(ctx context.Context) time.Time {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return time.Now().Add(maxThinkTimeout)
+	}
+	return deadline
 }
 
 // chatWorkflowRun 封装一次聊天请求的工作流生命周期，负责串联事件、检查点和最终状态。
@@ -117,6 +137,18 @@ func marshalWorkflowPayload(payload any) string {
 	return string(data)
 }
 
+// workflowPersistContext 为工作流持久化构造隔离取消但保留截止时间的上下文。
+// HTTP 客户端断连会取消 request context；若直接透传到 GORM，SSE 事件与检查点落库会收到 context canceled。
+func workflowPersistContext(ctx context.Context) context.Context {
+	persistCtx := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		persistCtx, cancel = context.WithDeadline(persistCtx, deadline)
+		_ = cancel
+	}
+	return persistCtx
+}
+
 // newChatWorkflowRun 创建或复用一次聊天工作流运行；如果存储不可用，则返回禁用状态的空壳对象。
 func newChatWorkflowRun(ctx context.Context, sessionID, query string, deepThinking bool) *chatWorkflowRun {
 	r := &chatWorkflowRun{
@@ -179,7 +211,7 @@ func (r *chatWorkflowRun) appendEvent(ctx context.Context, eventType string, pay
 	}
 	event := workflow.BuildNextEvent(r.runID, r.seq, eventType, marshalWorkflowPayload(payload))
 	r.seq = event.ID
-	if err := r.store.AppendEvent(ctx, event); err != nil {
+	if err := r.store.AppendEvent(workflowPersistContext(ctx), event); err != nil {
 		g.Log().Warningf(ctx, "[Chat] 追加 workflow 事件失败 | run_id=%s | seq=%d | type=%s | err=%v", r.runID, event.ID, eventType, err)
 	}
 }
@@ -189,7 +221,7 @@ func (r *chatWorkflowRun) saveCheckpoint(ctx context.Context, step string, value
 	if r == nil || !r.enabled || r.store == nil {
 		return
 	}
-	if err := r.store.SaveCheckpoint(ctx, workflow.CheckpointSnapshot{
+	if err := r.store.SaveCheckpoint(workflowPersistContext(ctx), workflow.CheckpointSnapshot{
 		RunID:        r.runID,
 		CheckpointID: step,
 		Step:         step,
@@ -205,7 +237,7 @@ func (r *chatWorkflowRun) finish(ctx context.Context, status, outputPayload, err
 	if r == nil || !r.enabled || r.store == nil {
 		return
 	}
-	if err := r.store.FinishRun(ctx, r.runID, status, outputPayload, errorMessage); err != nil {
+	if err := r.store.FinishRun(workflowPersistContext(ctx), r.runID, status, outputPayload, errorMessage); err != nil {
 		g.Log().Warningf(ctx, "[Chat] 完成 workflow run 失败 | run_id=%s | err=%v", r.runID, err)
 	}
 }
@@ -362,10 +394,13 @@ func ExecuteDeepThink(ctx context.Context, sessionId, query string, messageIndex
 	mem.SetMessages(schema.UserMessage(query))
 
 	// 阶段一：预思考（流式推送 think 事件，错误不中断主流程）
+	// 预思考只用于增强用户可见性，不应吞掉正式 Plan Agent 的总预算。
 	onOutput(string(core.IntentStatus), "深度思考中...")
-	thinkErr := plan_pipeline.StreamThinkChunks(recCtx, query, func(chunk string) {
+	thinkCtx, thinkCancel := context.WithTimeout(context.WithoutCancel(recCtx), normalizeThinkTimeout(time.Until(deadlineFromContext(recCtx))))
+	thinkErr := plan_pipeline.StreamThinkChunks(thinkCtx, query, func(chunk string) {
 		onOutput(string(core.IntentPlanStep), plan_pipeline.MarshalThinkChunk(chunk))
 	})
+	thinkCancel()
 	if thinkErr != nil {
 		g.Log().Warningf(ctx, "[Intent] 预思考阶段失败，继续执行 Plan Agent | session=%s | err=%v", sessionId, thinkErr)
 	}

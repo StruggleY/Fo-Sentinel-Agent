@@ -72,6 +72,28 @@ func initWorkflowStore(ctx context.Context) workflow.Store {
 	return workflow.NewGORMStore(db)
 }
 
+// workflowPersistContext 为 SSE 工作流持久化构造隔离取消但保留截止时间的上下文。
+// HTTP 客户端断连会取消请求 context；若直接透传到 GORM，会导致事件落库和完成状态写回报 context canceled。
+func workflowPersistContext(ctx context.Context) context.Context {
+	persistCtx := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		persistCtx, cancel = context.WithDeadline(persistCtx, deadline)
+		_ = cancel
+	}
+	return persistCtx
+}
+
+// normalizeDeepThinkingTimeoutSec 规范化深度思考超时时间。
+// 深度思考包含预思考 + Planner + 多轮 Executor/Replanner + 多 Worker 串行调用，
+// 复杂场景下 300 秒容易在正常执行过程中被打满，因此设置 600 秒保底值。
+func normalizeDeepThinkingTimeoutSec(sec int) int {
+	if sec < 600 {
+		return 600
+	}
+	return sec
+}
+
 // FileUpload 上传知识文档并构建向量索引，单次上限 50 MB。
 // 支持格式：.txt .md .markdown .pdf .docx .pptx
 // 文件解析和保存依赖 GoFrame API，必须保留在 HTTP 层；向量索引构建委托 chatsvc.BuildFileIndex。
@@ -247,7 +269,7 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, 
 			Payload:   data,
 			CreatedAt: time.Now(),
 		}
-		if err := workflowStore.AppendEvent(ctx, event); err != nil {
+		if err := workflowStore.AppendEvent(workflowPersistContext(ctx), event); err != nil {
 			g.Log().Warningf(ctx, "[Chat] 追加 workflow 事件失败 | run_id=%s | seq=%d | type=%s | err=%v", workflowRunID, seq, eventType, err)
 		}
 		client.SendEvent(seq, eventType, data)
@@ -263,7 +285,7 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, 
 			status = workflow.RunStatusFailed
 			errorMessage = execErr.Error()
 		}
-		if err := workflowStore.FinishRun(ctx, workflowRunID, status, "", errorMessage); err != nil {
+		if err := workflowStore.FinishRun(workflowPersistContext(ctx), workflowRunID, status, "", errorMessage); err != nil {
 			g.Log().Warningf(ctx, "[Chat] 完成 workflow run 失败 | run_id=%s | err=%v", workflowRunID, err)
 		}
 	}()
@@ -297,7 +319,8 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, 
 	// 超时后 agentCtx.Done() 触发，LLM 调用中断，SSE 推送 error 事件给前端。
 	timeout := time.Duration(g.Cfg().MustGet(ctx, "limiter.agent_timeout_sec", 90).Int()) * time.Second
 	if req.DeepThinking {
-		timeout = time.Duration(g.Cfg().MustGet(ctx, "limiter.agent_deep_timeout_sec", 300).Int()) * time.Second
+		deepTimeoutSec := normalizeDeepThinkingTimeoutSec(g.Cfg().MustGet(ctx, "limiter.agent_deep_timeout_sec", 600).Int())
+		timeout = time.Duration(deepTimeoutSec) * time.Second
 	}
 	agentCtx, agentCancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer agentCancel()
