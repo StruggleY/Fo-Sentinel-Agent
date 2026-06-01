@@ -67,6 +67,20 @@ func UpdateEventStatus(ctx context.Context, id, status string) error {
 	return db.Model(&Event{}).Where("id = ?", id).Update("status", status).Error
 }
 
+// ClaimEventForOps 原子抢占事件的 AI 运维处理权。
+// 只有 new 状态能被抢占为 processing，避免多个触发入口同时启动同一事件的运维任务。
+func ClaimEventForOps(ctx context.Context, id string) (bool, error) {
+	db, err := DB(ctx)
+	if err != nil {
+		return false, err
+	}
+	result := db.Model(&Event{}).Where("id = ? AND status = ?", id, "new").Update("status", "processing")
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 // UpdateEventDescription 将 AI 分析结论写入事件 Metadata 的 ai_analysis 字段。
 func UpdateEventDescription(ctx context.Context, id, description string) error {
 	db, err := DB(ctx)

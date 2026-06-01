@@ -50,9 +50,25 @@ func ExecuteRun(ctx context.Context, runID string, event *dao.Event) error {
 		return fmt.Errorf("运维执行失败: %w", err)
 	}
 
+	if nextStatus := nextAutoOpsStatus(event.Status); nextStatus != event.Status {
+		if err := dao.UpdateEventStatus(ctx, event.ID, nextStatus); err != nil {
+			g.Log().Warningf(ctx, "[ops] 更新事件状态失败 | runID=%s | eventID=%s | status=%s | err=%v", runID, event.ID, nextStatus, err)
+		} else {
+			event.Status = nextStatus
+		}
+	}
 	dao.UpdateRunStatus(ctx, runID, "success", "")
 	g.Log().Infof(ctx, "[ops] 执行完成 | runID=%s | elapsed=%s", runID, time.Since(startedAt).Round(time.Millisecond))
 	return nil
+}
+
+func nextAutoOpsStatus(current string) string {
+	switch current {
+	case "new", "processing":
+		return "resolved"
+	default:
+		return current
+	}
 }
 
 // RunEventAnalysis 调用事件分析 Agent，返回分析文本（供 ai_analyze action 注入使用）
@@ -117,6 +133,15 @@ func RunWithQuery(ctx context.Context, query string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取事件失败: %w", err)
 	}
+	claimed, err := dao.ClaimEventForOps(ctx, event.ID)
+	if err != nil {
+		return "", fmt.Errorf("抢占事件运维处理权失败: %w", err)
+	}
+	if !claimed {
+		return fmt.Sprintf("事件「%s」已被其他 AI 运维任务接管或已完成，跳过重复触发。", event.Title), nil
+	}
+	event.Status = "processing"
+
 	runID := uuid.New().String()
 	g.Log().Infof(ctx, "[ops] Plan Agent 触发运维 | runID=%s | event=%s", runID, eventID)
 	go func() {
