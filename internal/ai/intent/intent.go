@@ -11,6 +11,7 @@ import (
 
 	"Fo-Sentinel-Agent/internal/ai/cache"
 	_ "Fo-Sentinel-Agent/internal/ai/intent/subagents"
+	"Fo-Sentinel-Agent/internal/ai/memory"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"
@@ -75,11 +76,17 @@ func (s *Intent) Execute(query string, callback StreamCallback) (*Result, error)
 		s.memory.SetMessages(schema.AssistantMessage(output.Content, nil))
 
 		// 异步保存最新状态到 Redis，不阻塞主链路
+		msgs := s.memory.GetRecentMessages()
+		summary := s.memory.GetLongTermSummary()
+		userID, _ := s.ctx.Value(memory.UserIdCtxKey{}).(string)
 		go func() {
 			bgCtx := context.Background()
-			if persistErr := cache.SaveSessionWithRetry(bgCtx, s.sessionId,
-				s.memory.GetRecentMessages(), s.memory.GetLongTermSummary()); persistErr != nil {
+			if persistErr := cache.SaveSessionWithRetry(bgCtx, s.sessionId, msgs, summary); persistErr != nil {
 				g.Log().Errorf(bgCtx, "[Intent] 保存会话状态失败（已重试） | session=%s | err=%v", s.sessionId, persistErr)
+			}
+			// 消息数 >= 6 时触发隐式偏好推断；canInfer 内部 1 小时防抖，无需在此计数
+			if userID != "" && len(msgs) >= 6 {
+				memory.TriggerInferPreference(bgCtx, userID, msgs)
 			}
 		}()
 	}

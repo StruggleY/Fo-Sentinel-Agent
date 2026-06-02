@@ -5,6 +5,7 @@ import (
 	"context"
 
 	v1 "Fo-Sentinel-Agent/api/rageval/v1"
+	"Fo-Sentinel-Agent/internal/ai/memory"
 	rageval "Fo-Sentinel-Agent/internal/service/rageval"
 )
 
@@ -72,7 +73,11 @@ func (c *controllerV1) DeleteTrace(ctx context.Context, req *v1.DeleteTraceReq) 
 
 // Feedback 提交消息反馈。
 func (c *controllerV1) Feedback(ctx context.Context, req *v1.FeedbackReq) (res *v1.FeedbackRes, err error) {
-	return &v1.FeedbackRes{}, rageval.SubmitFeedback(ctx, req.SessionID, req.MessageIndex, req.Vote, req.Reason)
+	userID := req.UserID
+	if id, _ := ctx.Value(memory.UserIdCtxKey{}).(string); id != "" {
+		userID = id
+	}
+	return &v1.FeedbackRes{}, rageval.SubmitFeedback(ctx, req.SessionID, userID, req.MessageIndex, req.Vote, req.Reasons)
 }
 
 // FeedbackStats 返回反馈统计。

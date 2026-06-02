@@ -15,6 +15,7 @@ import (
 	apichat "Fo-Sentinel-Agent/api/chat"
 	v1 "Fo-Sentinel-Agent/api/chat/v1"
 	aidoc "Fo-Sentinel-Agent/internal/ai/document"
+	"Fo-Sentinel-Agent/internal/ai/memory"
 	toolsintelligence "Fo-Sentinel-Agent/internal/ai/tools/intelligence"
 	"Fo-Sentinel-Agent/internal/ai/trace"
 	"Fo-Sentinel-Agent/internal/ai/workflow"
@@ -326,6 +327,9 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (*v1.ChatRes, 
 	defer agentCancel()
 	if req.WebSearch {
 		agentCtx = context.WithValue(agentCtx, toolsintelligence.WebSearchEnabledKey{}, true)
+	}
+	if req.UserID != "" {
+		agentCtx = context.WithValue(agentCtx, memory.UserIdCtxKey{}, req.UserID)
 	}
 	if req.DeepThinking {
 		err = chatsvc.ExecuteDeepThink(agentCtx, req.SessionId, req.Query, req.MessageIndex, func(intentType, chunk string) {

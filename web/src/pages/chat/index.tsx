@@ -514,20 +514,19 @@ export default function Chat() {
   }
 
   // ── 消息反馈 ──────────────────────────────────────────────────────────────
-  const submitFeedback = async (messageIndex: number, vote: 1 | -1) => {
+  const submitFeedback = async (messageIndex: number, vote: 1 | -1, reasons?: string[]) => {
     if (!currentSessionId) {
       console.warn('submitFeedback: currentSessionId is empty')
       return
     }
-    // toggle：再次点击同一个按钮 → 取消反馈
     const current = votes[messageIndex]
-    const newVote = current === vote ? 0 : vote
+    // 带 reasons 时为"更新原因"，跳过 toggle 直接提交；否则 toggle
+    const newVote = (reasons !== undefined) ? vote : (current === vote ? 0 : vote)
     const nextVotes = { ...votes }
     if (newVote === 0) delete nextVotes[messageIndex]
     else nextVotes[messageIndex] = newVote as 1 | -1
 
     setVotes(nextVotes)
-    // 立即同步到 localStorage
     if (Object.keys(nextVotes).length > 0) {
       localStorage.setItem(`chat_votes_${currentSessionId}`, JSON.stringify(nextVotes))
     } else {
@@ -535,7 +534,13 @@ export default function Chat() {
     }
 
     try {
-      await ragevalService.submitFeedback(currentSessionId, messageIndex, newVote as 1 | -1 | 0)
+      // 若存在旧的不同 vote，先发取消请求
+      if (current && current !== vote) {
+        await ragevalService.submitFeedback(currentSessionId, messageIndex, 0)
+      }
+      if (newVote !== 0) {
+        await ragevalService.submitFeedback(currentSessionId, messageIndex, newVote as 1 | -1, reasons)
+      }
     } catch {
       // 静默失败，不打扰用户
     }
@@ -660,7 +665,7 @@ interface MessageBubbleProps {
   isLast: boolean
   messageIndex: number
   vote?: 1 | -1
-  onVote: (messageIndex: number, vote: 1 | -1) => void
+  onVote: (messageIndex: number, vote: 1 | -1, reasons?: string[]) => void
   isEditing: boolean
   editingContent: string
   onStartEdit: (index: number, content: string) => void
@@ -671,7 +676,21 @@ interface MessageBubbleProps {
 
 function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing, editingContent, onStartEdit, onCancelEdit, onSaveEdit, onEditingContentChange }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false)
+  const [showReasonPicker, setShowReasonPicker] = useState(false)
+  const [selectedReasons, setSelectedReasons] = useState<string[]>([])
   const editTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const reasonPickerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showReasonPicker) return
+    const handler = (e: MouseEvent) => {
+      if (reasonPickerRef.current && !reasonPickerRef.current.contains(e.target as Node)) {
+        setShowReasonPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showReasonPicker])
 
   const adjustEditHeight = useCallback(() => {
     const el = editTextareaRef.current
@@ -869,9 +888,12 @@ function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing,
                     <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1F2937]" />
                   </div>
                 </div>
-                <div className="relative group/dislike">
+                <div className="relative" ref={reasonPickerRef}>
                   <button
-                    onClick={() => onVote(messageIndex, -1)}
+                    onClick={() => {
+                      if (vote === -1) { onVote(messageIndex, -1); setShowReasonPicker(false); setSelectedReasons([]) }
+                      else { onVote(messageIndex, -1); setShowReasonPicker(true) }
+                    }}
                     className={cn(
                       'p-1.5 rounded-full hover:bg-red-50 transition-colors',
                       vote === -1 ? 'text-red-500' : 'text-gray-500 hover:text-red-400',
@@ -879,10 +901,45 @@ function MessageBubble({ message, isLast, messageIndex, vote, onVote, isEditing,
                   >
                     <ThumbsDown className="w-3.5 h-3.5" />
                   </button>
-                  <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1F2937] px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover/dislike:opacity-100">
-                    没帮助
-                    <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1F2937]" />
-                  </div>
+                  {showReasonPicker && (
+                    <div className="absolute bottom-full left-0 mb-2 z-50 w-48 rounded-xl border border-gray-100 bg-white shadow-lg p-2 space-y-0.5">
+                      <p className="px-2 py-1 text-[11px] text-gray-400 font-medium">哪里没帮助？</p>
+                      {([
+                        ['too_verbose',          '回答太啰嗦'],
+                        ['too_brief',            '回答太简短'],
+                        ['not_technical_enough', '技术深度不够'],
+                        ['too_technical',        '过于技术化'],
+                        ['inaccurate',           '内容不准确'],
+                        ['off_topic',            '没有回答问题'],
+                      ] as [string, string][]).map(([key, label]) => {
+                        const checked = selectedReasons.includes(key)
+                        return (
+                          <button
+                            key={key}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedReasons(prev => checked ? prev.filter(r => r !== key) : [...prev, key])
+                            }}
+                            className={cn(
+                              'w-full text-left px-2 py-1.5 text-[12px] rounded-lg transition-colors flex items-center gap-1.5',
+                              checked ? 'bg-red-50 text-red-600' : 'text-gray-700 hover:bg-gray-50',
+                            )}
+                          >
+                            <span className={cn('flex h-3 w-3 flex-shrink-0 items-center justify-center rounded border text-[8px]', checked ? 'border-red-400 bg-red-400 text-white' : 'border-gray-300')}>
+                              {checked && '✓'}
+                            </span>
+                            {label}
+                          </button>
+                        )
+                      })}
+                      <button
+                        onClick={() => { onVote(messageIndex, -1, selectedReasons); setShowReasonPicker(false); setSelectedReasons([]) }}
+                        className="w-full mt-1 py-1.5 text-[12px] font-medium text-white bg-red-400 hover:bg-red-500 rounded-lg transition-colors"
+                      >
+                        确认
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

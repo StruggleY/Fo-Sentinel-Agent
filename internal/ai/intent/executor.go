@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 
 	"Fo-Sentinel-Agent/internal/ai/intent/core"
+	"Fo-Sentinel-Agent/internal/ai/memory"
 	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 
 	"github.com/cloudwego/eino/compose"
@@ -52,7 +53,18 @@ func newExecutorLambda() *compose.Lambda {
 			ID:        generateTaskID(),
 			Query:     input.Input.Query,
 			Intent:    input.IntentType,
-			SessionId: input.Input.SessionId, // 透传会话 ID，SubAgent 按此加载会话级 Redis 记忆
+			SessionId: input.Input.SessionId,
+		}
+
+		// 将用户偏好提示前置注入 Query，使标准模式 SubAgent 也能感知偏好
+		userID, _ := ctx.Value(memory.UserIdCtxKey{}).(string)
+		if userID != "" {
+			if pref := memory.GetPreference(ctx, userID); pref != nil {
+				if hint := pref.FormatPromptHint(); hint != "" {
+					task.Query = hint + task.Query
+					g.Log().Debugf(ctx, "[Executor] 注入用户偏好 | user=%s | hint=%q", userID, hint)
+				}
+			}
 		}
 
 		g.Log().Infof(ctx, "[Executor] 分发 SubAgent | intent=%s | task=%s | session=%s",

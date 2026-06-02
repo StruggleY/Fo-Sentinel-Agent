@@ -221,14 +221,29 @@ func (KnowledgeChunk) TableName() string { return "knowledge_chunks" }
 // MessageFeedback 用户对 AI 回答的点赞/踩
 type MessageFeedback struct {
 	ID           uint      `gorm:"primaryKey;autoIncrement"`
+	UserID       string    `gorm:"column:user_id;size:64;index"` // 关联用户，用于偏好推断
 	SessionID    string    `gorm:"column:session_id;size:64;index"`
 	MessageIndex int       `gorm:"column:message_index;not null"` // 消息在会话中的序号
 	Vote         int       `gorm:"column:vote;not null"`          // 1=点赞，-1=点踩
-	Reason       string    `gorm:"column:reason;size:500"`
+	Reasons      string    `gorm:"column:reasons;type:json"`      // JSON 数组，如 ["too_verbose","inaccurate"]
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (MessageFeedback) TableName() string { return "message_feedbacks" }
+
+// UserPreference 用户偏好记忆（显式设置 + 隐式推断）
+type UserPreference struct {
+	ID            uint      `gorm:"primaryKey;autoIncrement"`
+	UserID        string    `gorm:"column:user_id;size:64;uniqueIndex;not null"`
+	OutputStyle   string    `gorm:"column:output_style;size:32;default:detailed"`   // detailed / concise
+	AnalysisDepth string    `gorm:"column:analysis_depth;size:32;default:standard"` // quick / standard / deep
+	FocusAreas    string    `gorm:"column:focus_areas;type:json"`                   // JSON 数组，如 ["web","supply_chain"]
+	InferredNote  string    `gorm:"column:inferred_note;type:text"`                 // LLM 从对话中提取的偏好摘要
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (UserPreference) TableName() string { return "user_preferences" }
 
 // ========== AI 智能运维模块 ==========
 

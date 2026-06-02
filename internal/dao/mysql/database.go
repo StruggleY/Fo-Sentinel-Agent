@@ -53,7 +53,7 @@ func Init(ctx context.Context) error {
 		if err = db.WithContext(ctx).AutoMigrate(
 			&Event{}, &Subscription{}, &Report{}, &User{}, &Setting{}, &QueryTermMapping{},
 			&TraceRun{}, &TraceNode{}, &KnowledgeBase{}, &KnowledgeDocument{}, &KnowledgeChunk{},
-			&MessageFeedback{}, &OpsPlaybook{}, &OpsRun{}, &OpsRunStep{}, &OpsProtectedAsset{},
+			&MessageFeedback{}, &UserPreference{}, &OpsPlaybook{}, &OpsRun{}, &OpsRunStep{}, &OpsProtectedAsset{},
 			&WorkflowRun{}, &WorkflowEvent{}, &WorkflowCheckpoint{}, &SessionStateRevision{},
 		); err != nil {
 			initErr = fmt.Errorf("auto migrate: %w", err)

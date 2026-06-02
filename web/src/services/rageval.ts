@@ -1,4 +1,5 @@
 import api from './api'
+import { useAuthStore } from '@/stores/authStore'
 
 export interface TrendPoint {
   timestamp: string
@@ -119,12 +120,14 @@ export const ragevalService = {
     await api.delete('/rageval/v1/traces', { data: { trace_id: traceId } })
   },
 
-  async submitFeedback(sessionId: string, messageIndex: number, vote: 1 | -1 | 0, reason?: string): Promise<void> {
+  async submitFeedback(sessionId: string, messageIndex: number, vote: 1 | -1 | 0, reasons?: string[]): Promise<void> {
+    const userID = useAuthStore.getState().userID ?? ''
     await api.post('/rageval/v1/feedback', {
       session_id: sessionId,
       message_index: messageIndex,
       vote,
-      reason: reason ?? '',
+      reasons: reasons ?? [],
+      user_id: userID,
     })
   },
 

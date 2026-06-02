@@ -68,7 +68,12 @@ func SaveRecentMessages(ctx context.Context, sessionID string, recent []*schema.
 		g.Log().Debugf(ctx, "[Session] 消息列表为空，跳过保存 | session=%s", sessionID)
 		return nil
 	}
-	return redisdao.SaveSession(ctx, sessionID, recent, "")
+	// 先加载已有摘要，避免覆盖为空字符串
+	_, summary, err := redisdao.LoadSession(ctx, sessionID)
+	if err != nil {
+		summary = ""
+	}
+	return redisdao.SaveSession(ctx, sessionID, recent, summary)
 }
 
 // SaveSummary 仅保存长期摘要

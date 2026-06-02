@@ -72,10 +72,11 @@ type DeleteTraceRes struct{}
 
 type FeedbackReq struct {
 	g.Meta       `path:"/rageval/v1/feedback" method:"POST" tags:"RagEval" summary:"提交消息反馈"`
-	SessionID    string `json:"session_id" v:"required#session_id不能为空"`
-	MessageIndex int    `json:"message_index"`
-	Vote         int    `json:"vote" v:"required|in:1,-1,0#vote不能为空|vote必须为1、-1或0"`
-	Reason       string `json:"reason"`
+	UserID       string   `json:"user_id"` // 关联用户，用于偏好推断
+	SessionID    string   `json:"session_id" v:"required#session_id不能为空"`
+	MessageIndex int      `json:"message_index"`
+	Vote         int      `json:"vote" v:"required|in:1,-1,0#vote不能为空|vote必须为1、-1或0"`
+	Reasons      []string `json:"reasons"` // 多选标签，如 ["too_verbose","inaccurate"]
 }
 
 // FeedbackRes 提交用户反馈响应

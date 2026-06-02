@@ -30,12 +30,19 @@ package rageval
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"time"
 
+	"Fo-Sentinel-Agent/internal/ai/cache"
+	"Fo-Sentinel-Agent/internal/ai/memory"
 	dao "Fo-Sentinel-Agent/internal/dao/mysql"
+	redisdao "Fo-Sentinel-Agent/internal/dao/redis"
+
+	"github.com/cloudwego/eino/schema"
+	"github.com/gogf/gf/v2/frame/g"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -287,16 +294,24 @@ func DeleteTrace(ctx context.Context, traceID string) error {
 // SubmitFeedback 提交消息点赞/踩。
 // 同一 (session_id, message_index) 只保留最新一条，重复提交时更新 vote，
 // 传入 vote=0 表示取消反馈（直接删除该条记录）。
-func SubmitFeedback(ctx context.Context, sessionID string, messageIndex, vote int, reason string) error {
+// 踩（-1）时异步触发用户偏好重新推断，形成反馈闭环。
+func SubmitFeedback(ctx context.Context, sessionID, userID string, messageIndex, vote int, reasons []string) error {
 	db, err := dao.DB(ctx)
 	if err != nil {
 		return err
 	}
 	if vote == 0 {
-		// 取消反馈：删除该条记录（硬删除，不影响软删除字段）
-		return db.Unscoped().
+		// 取消反馈：硬删除该条记录
+		// 注意：偏好字段（output_style/analysis_depth/inferred_note）不回滚，
+		// 偏好是长期画像，单次取消不足以推翻已积累的特征。
+		if err := db.Unscoped().
 			Where("session_id = ? AND message_index = ?", sessionID, messageIndex).
-			Delete(&dao.MessageFeedback{}).Error
+			Delete(&dao.MessageFeedback{}).Error; err != nil {
+			g.Log().Warningf(ctx, "[Feedback] 取消反馈失败 | session=%s | idx=%d | err=%v", sessionID, messageIndex, err)
+			return err
+		}
+		g.Log().Infof(ctx, "[Feedback] 取消反馈 | session=%s | idx=%d | user=%s", sessionID, messageIndex, userID)
+		return nil
 	}
 	// Upsert：已存在则更新 vote/reason，不存在则插入
 	var existing dao.MessageFeedback
@@ -306,20 +321,104 @@ func SubmitFeedback(ctx context.Context, sessionID string, messageIndex, vote in
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
+	reasonsJSON := marshalReasons(reasons)
 	if err == nil {
-		// 记录已存在，更新
-		return db.Model(&existing).Updates(map[string]any{
-			"vote":   vote,
-			"reason": reason,
-		}).Error
-	}
-	// 记录不存在，插入
-	return db.Create(&dao.MessageFeedback{
+		if updateErr := db.Model(&existing).Updates(map[string]any{
+			"vote":    vote,
+			"reasons": reasonsJSON,
+			"user_id": userID,
+		}).Error; updateErr != nil {
+			g.Log().Warningf(ctx, "[Feedback] 更新反馈失败 | session=%s | idx=%d | vote=%d | err=%v", sessionID, messageIndex, vote, updateErr)
+			return updateErr
+		}
+	} else if err := db.Create(&dao.MessageFeedback{
+		UserID:       userID,
 		SessionID:    sessionID,
 		MessageIndex: messageIndex,
 		Vote:         vote,
-		Reason:       reason,
-	}).Error
+		Reasons:      reasonsJSON,
+	}).Error; err != nil {
+		g.Log().Warningf(ctx, "[Feedback] 写入反馈失败 | session=%s | idx=%d | vote=%d | err=%v", sessionID, messageIndex, vote, err)
+		return err
+	}
+
+	voteLabel := "点赞"
+	if vote == -1 {
+		voteLabel = "点踩"
+	}
+	g.Log().Infof(ctx, "[Feedback] %s | session=%s | idx=%d | user=%s | reasons=%v", voteLabel, sessionID, messageIndex, userID, reasons)
+
+	// 踩信号 → 按 reason 标签分流处理偏好（反馈闭环，update/create 均触发）
+	if vote == -1 && userID != "" {
+		go handleDislikePreference(context.Background(), sessionID, userID, reasons)
+	}
+	return nil
+}
+
+// handleDislikePreference 根据踩的原因标签更新用户偏好。
+// 明确标签（风格/深度类）直接写字段，无需 LLM；内容质量类不影响偏好；兜底走 LLM 推断。
+func handleDislikePreference(ctx context.Context, sessionID, userID string, reasons []string) {
+	db, err := dao.DB(ctx)
+	if err != nil {
+		return
+	}
+
+	updates := map[string]any{}
+	for _, reason := range reasons {
+		switch reason {
+		case "too_verbose":
+			updates["output_style"] = "concise"
+		case "too_brief":
+			updates["output_style"] = "detailed"
+		case "too_technical":
+			updates["analysis_depth"] = "quick"
+		case "not_technical_enough":
+			updates["analysis_depth"] = "deep"
+		}
+	}
+	// 仅内容质量标签（inaccurate/off_topic）时不影响偏好，走 LLM 推断
+
+	if len(updates) > 0 {
+		// 明确标签：直接 upsert 偏好字段，零 LLM 开销
+		res := db.Model(&dao.UserPreference{}).Where("user_id = ?", userID).Updates(updates)
+		if res.Error != nil {
+			return
+		}
+		if res.RowsAffected == 0 {
+			row := dao.UserPreference{UserID: userID, FocusAreas: "[]"}
+			if v, ok := updates["output_style"].(string); ok {
+				row.OutputStyle = v
+			}
+			if v, ok := updates["analysis_depth"].(string); ok {
+				row.AnalysisDepth = v
+			}
+			db.Create(&row)
+		}
+		memory.InvalidateCache(userID)
+		return
+	}
+
+	// 兜底：无明确标签，走 LLM 推断
+	recent, summary, loadErr := loadRecentForInfer(ctx, sessionID)
+	if loadErr != nil || len(recent) == 0 {
+		return
+	}
+	msgs := cache.BuildHistoryWithSummary(recent, summary)
+	memory.TriggerInferPreference(ctx, userID, msgs)
+}
+
+// loadRecentForInfer 从 Redis 加载会话历史，供踩信号触发偏好推断使用
+func loadRecentForInfer(ctx context.Context, sessionID string) ([]*schema.Message, string, error) {
+	return redisdao.LoadSession(ctx, sessionID)
+}
+
+// marshalReasons 将 reasons 序列化为 JSON 字符串存入数据库
+func marshalReasons(reasons []string) string {
+	if len(reasons) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(reasons)
+	return string(b)
 }
 
 // FeedbackStats 反馈统计结果。
@@ -394,11 +493,11 @@ func GetFeedbackStats(ctx context.Context) (*FeedbackStats, error) {
 		if vote == -1 {
 			label = "没帮助"
 		}
-		// 找第一条有 reason 的样本作为代表，否则用默认文案
+		// 找第一条有 reasons 的样本作为代表，否则用默认文案
 		reason := ""
 		for _, s := range g.samples {
-			if s.Reason != "" {
-				reason = s.Reason
+			if s.Reasons != "" {
+				reason = s.Reasons
 				break
 			}
 		}

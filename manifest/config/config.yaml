@@ -121,6 +121,7 @@ memory:
   summaryBatchSize: 10  # 每次摘要压缩的消息条数
   tokenTrigger: 3000    # Token 主触发阈值：累计 Token 超出时触发摘要压缩
   minRecentMessages: 4  # 摘要后最少保留的近期消息数（保证对话连贯性）
+  inferDebounceMinutes: 5 # 用户偏好推断防抖间隔（分钟）
 
 # 工具
 tools:

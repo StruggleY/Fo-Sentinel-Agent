@@ -1,5 +1,6 @@
 import api from './api'
 import { streamFetch } from '@/utils/sse'
+import { useAuthStore } from '@/stores/authStore'
 import {
   ApiResponse,
   UploadConfig,
@@ -135,6 +136,7 @@ export const chatService = {
     const sid = sessionId || getCurrentSessionId()
     const runId = sessionStorage.getItem(`chat_run_id_${sid}`) || ''
     const lastSeq = parseInt(sessionStorage.getItem(`chat_last_seq_${sid}`) || '0')
+    const userID = useAuthStore.getState().userID ?? ''
 
     streamFetch(
       '/api/chat/v1/chat',
@@ -144,6 +146,7 @@ export const chatService = {
         message_index: messageIndex,
         deep_thinking: deepThinking,
         web_search: webSearch,
+        user_id: userID,
         run_id: runId,
         last_seq: lastSeq
       },

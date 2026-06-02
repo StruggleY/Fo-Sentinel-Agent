@@ -22,6 +22,7 @@ import (
 	"Fo-Sentinel-Agent/internal/ai/agent/risk_pipeline"
 	"Fo-Sentinel-Agent/internal/ai/agent/solve_pipeline"
 	"Fo-Sentinel-Agent/internal/ai/cache"
+	"Fo-Sentinel-Agent/internal/ai/memory"
 	aitrace "Fo-Sentinel-Agent/internal/ai/trace"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -84,10 +85,21 @@ func buildWorkerContext(ctx context.Context) string {
 		}
 	}
 
-	if sb.Len() == 0 {
-		return ""
+	historyStr := ""
+	if sb.Len() > 0 {
+		historyStr = "【对话上下文】\n" + sb.String() + "\n"
 	}
-	return "【对话上下文】\n" + sb.String() + "\n"
+
+	// 注入用户偏好（放在历史上下文之前，让 LLM 优先感知）
+	userID, _ := ctx.Value(memory.UserIdCtxKey{}).(string)
+	if pref := memory.GetPreference(ctx, userID); pref != nil {
+		if hint := pref.FormatPromptHint(); hint != "" {
+			result := hint + historyStr
+			fmt.Printf("[buildWorkerContext] enrichedQuery:\n%s\n", result)
+			return result
+		}
+	}
+	return historyStr
 }
 
 // truncateWorkerOutput 截断 Worker 输出，防止 Executor 上下文溢出。
@@ -110,10 +122,13 @@ func truncateWorkerOutput(s string) string {
 // 只保留业务需要的 sessionId（用于会话历史）和 GoFrame 请求 context 值。
 func isolateCtx(ctx context.Context) context.Context {
 	sessionId, _ := ctx.Value(SessionIdCtxKey{}).(string)
-	// 从 Background 派生，彻底清除所有 Eino compose/adk 内部 state
+	userID, _ := ctx.Value(memory.UserIdCtxKey{}).(string)
 	isolated := context.Background()
 	if sessionId != "" {
 		isolated = context.WithValue(isolated, SessionIdCtxKey{}, sessionId)
+	}
+	if userID != "" {
+		isolated = context.WithValue(isolated, memory.UserIdCtxKey{}, userID)
 	}
 	return isolated
 }
